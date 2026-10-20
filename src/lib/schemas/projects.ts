@@ -12,6 +12,7 @@ export const projectCreateSchema = z.object({
 export const projectRenameSchema = z.object({
   id: z.string().uuid("ID de projeto inválido."),
   name: z.string().trim().min(1, "Nome do projeto é obrigatório."),
+  description: z.string().trim().nullable().optional(),
 });
 
 export type ProjectCreateInput = z.infer<typeof projectCreateSchema>;

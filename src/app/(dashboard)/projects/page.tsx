@@ -170,7 +170,11 @@ export default async function ProjectsPage() {
                       templates={projectTemplates}
                       disciplines={(disciplines ?? []) as ClDiscipline[]}
                     />
-                    <ProjectCardMenu projectId={project.id} projectName={project.name} />
+                    <ProjectCardMenu
+                      projectId={project.id}
+                      projectName={project.name}
+                      projectDescription={project.description}
+                    />
                   </div>
                 </div>
                 <div className="border-t px-6 py-3">

@@ -58,8 +58,12 @@ export async function deleteProject(projectId: string) {
   return ok();
 }
 
-export async function renameProject(projectId: string, name: string) {
-  const parsed = projectRenameSchema.safeParse({ id: projectId, name });
+export async function renameProject(
+  projectId: string,
+  name: string,
+  description?: string | null,
+) {
+  const parsed = projectRenameSchema.safeParse({ id: projectId, name, description });
   if (!parsed.success) {
     return fail(parsed.error.issues[0]?.message ?? "Dados inválidos.");
   }
@@ -67,12 +71,16 @@ export async function renameProject(projectId: string, name: string) {
   const supabase = createClient();
   const { error } = await supabase
     .from("cl_projects")
-    .update({ name: parsed.data.name })
+    .update({
+      name: parsed.data.name,
+      description: parsed.data.description || null,
+    })
     .eq("id", parsed.data.id);
 
   if (error) return fail(error.message);
 
   revalidatePath("/projects");
+  revalidatePath(`/projects/${parsed.data.id}`);
   return ok();
 }
 

@@ -36,8 +36,8 @@ import {
 interface TemplateCardProps {
   id: string;
   name: string;
+  description?: string | null;
   projectId: string | null;
-  projectName: string | null;
   discipline: { name: string; color: string } | null;
   layoutMode?: "standard" | "matrix";
   environments?: string[] | null;
@@ -46,8 +46,8 @@ interface TemplateCardProps {
 export function TemplateCard({
   id,
   name,
+  description,
   projectId,
-  projectName,
   discipline,
   layoutMode,
   environments,
@@ -138,8 +138,8 @@ export function TemplateCard({
             )}
             <CardHeader className="pb-4 pr-10">
               <CardTitle className="line-clamp-1 text-base">{name}</CardTitle>
-              <p className="line-clamp-1 text-xs text-muted-foreground">
-                {projectName ?? "—"}
+              <p className="text-xs text-muted-foreground">
+                {description?.trim() || "—"}
               </p>
               {layoutMode === "matrix" && environments && environments.length > 0 && (
                 <div className="mt-2 space-y-1">

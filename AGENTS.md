@@ -189,3 +189,30 @@ Não altere a ordenação da query sem ajustar essa lógica.
 O botão "Gerar link" (`project-public-link-dialog.tsx`) só é exibido quando
 não há nenhum link cadastrado (`links.length === 0`). Cada projeto deve ter no
 máximo um link ativo; criar múltiplos links já não é suportado pela UI.
+
+## Renomear projeto (nome + descrição)
+
+`renameProject(id, name, description?)` atualiza os dois campos de uma vez.
+O schema `projectRenameSchema` aceita `description` opcional/nullable; string
+vazia vira `null` no update. A action revalida `/projects` e
+`/projects/:id`. O dialog do card (`ProjectCardMenu`) abre com os valores
+atuais e mostra o erro de validação no próprio formulário.
+
+## Card de template em Configurações
+
+`TemplateCard` exibe a **descrição do template**, não o nome do projeto.
+A prop é `description`; `projectName` foi removida.
+
+## Drag-and-drop no builder (`template-builder.tsx`)
+
+Há um único `DndContext` para seções e campos. `collisionDetection` customizado
+evita cruzar os dois tipos de alvo:
+
+- Arrastar **seção**: só considera droppables cujo `id` está em
+  `sections.map(s => s.local_id)` (distância do ponteiro ao centro vertical).
+- Arrastar **campo**: só considera irmãos da mesma seção
+  (`section_local_id` igual), via `closestCenter` filtrado.
+
+`handleDragEnd` ramifica do mesmo jeito: se o `active.id` é seção, reordena
+`sections`; senão, reordena os campos da seção do campo ativo. Não volte a
+aninhaar um `DndContext` por seção — isso quebrava o drag de seções.

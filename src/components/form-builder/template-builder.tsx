@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useMemo, useRef, useState, useTransition, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import {
   Group as PanelGroup,
@@ -14,18 +14,22 @@ import {
   closestCenter,
   useSensor,
   useSensors,
+  type CollisionDetection,
   type DragEndEvent,
 } from "@dnd-kit/core";
 import {
   SortableContext,
   arrayMove,
   sortableKeyboardCoordinates,
+  useSortable,
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import {
   BookmarkPlus,
   ChevronDown,
   ChevronRight,
+  GripVertical,
   MoreVertical,
   Pencil,
   Plus,
@@ -167,6 +171,47 @@ function fieldsFromInitial(
   }));
 }
 
+function SortableSectionShell({
+  id,
+  children,
+}: {
+  id: string;
+  children: (dragHandle: ReactNode) => ReactNode;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
+    useSortable({ id });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.6 : 1,
+    position: "relative" as const,
+    zIndex: isDragging ? 10 : undefined,
+  };
+
+  const dragHandle = (
+    <button
+      type="button"
+      className="flex h-7 w-7 shrink-0 cursor-grab items-center justify-center rounded text-muted-foreground/60 hover:bg-muted hover:text-foreground active:cursor-grabbing"
+      aria-label="Arrastar seção"
+      {...attributes}
+      {...listeners}
+    >
+      <GripVertical className="h-4 w-4" />
+    </button>
+  );
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className="overflow-hidden rounded-lg border bg-background"
+    >
+      {children(dragHandle)}
+    </div>
+  );
+}
+
 function defaultOptionsFor(type: FieldType): FieldOptions {
   if (type === "select" || type === "radio") {
     return { choices: [] };
@@ -232,6 +277,48 @@ export function TemplateBuilder({
       coordinateGetter: sortableKeyboardCoordinates,
     }),
   );
+
+  const sectionsRef = useRef(sections);
+  const fieldsRef = useRef(fields);
+  sectionsRef.current = sections;
+  fieldsRef.current = fields;
+
+  const collisionDetection: CollisionDetection = (args) => {
+    const activeId = String(args.active.id);
+    const sectionIds = new Set(sectionsRef.current.map((s) => s.local_id));
+
+    if (sectionIds.has(activeId)) {
+      const pointerY = args.pointerCoordinates?.y ?? args.collisionRect.top;
+      const collisions = args.droppableContainers.flatMap((container) => {
+        if (!sectionIds.has(String(container.id))) return [];
+        const rect = args.droppableRects.get(container.id);
+        if (!rect) return [];
+        const midY = rect.top + rect.height / 2;
+        return [
+          {
+            id: container.id,
+            data: { droppableContainer: container, value: Math.abs(pointerY - midY) },
+          },
+        ];
+      });
+      collisions.sort((a, b) => a.data.value - b.data.value);
+      return collisions;
+    }
+
+    const activeField = fieldsRef.current.find((f) => f.localId === activeId);
+    const siblingIds = new Set(
+      fieldsRef.current
+        .filter((f) => f.section_local_id === activeField?.section_local_id)
+        .map((f) => f.localId),
+    );
+
+    return closestCenter({
+      ...args,
+      droppableContainers: args.droppableContainers.filter((container) =>
+        siblingIds.has(String(container.id)),
+      ),
+    });
+  };
 
   function toggleField(localId: string) {
     setExpandedFieldLocalId((prev) => (prev === localId ? null : localId));
@@ -340,15 +427,32 @@ export function TemplateBuilder({
     );
   }
 
-  function handleDragEnd(sectionLocalId: string, event: DragEndEvent) {
+  function handleDragEnd(event: DragEndEvent) {
     const { active, over } = event;
     if (!over || active.id === over.id) return;
+
+    const activeId = String(active.id);
+    const overId = String(over.id);
+    const sectionIds = new Set(sections.map((s) => s.local_id));
+
+    if (sectionIds.has(activeId)) {
+      setSections((prev) => {
+        const oldIndex = prev.findIndex((s) => s.local_id === activeId);
+        const newIndex = prev.findIndex((s) => s.local_id === overId);
+        if (oldIndex < 0 || newIndex < 0) return prev;
+        return arrayMove(prev, oldIndex, newIndex);
+      });
+      return;
+    }
+
+    const sectionLocalId = fields.find((f) => f.localId === activeId)?.section_local_id;
+    if (!sectionLocalId) return;
 
     setFields((prev) => {
       const sectionFields = prev.filter((f) => f.section_local_id === sectionLocalId);
       const otherFields = prev.filter((f) => f.section_local_id !== sectionLocalId);
-      const oldIndex = sectionFields.findIndex((f) => f.localId === active.id);
-      const newIndex = sectionFields.findIndex((f) => f.localId === over.id);
+      const oldIndex = sectionFields.findIndex((f) => f.localId === activeId);
+      const newIndex = sectionFields.findIndex((f) => f.localId === overId);
       if (oldIndex < 0 || newIndex < 0) return prev;
       const reordered = arrayMove(sectionFields, oldIndex, newIndex);
       return [...otherFields, ...reordered];
@@ -615,128 +719,139 @@ export function TemplateBuilder({
               </Button>
             </div>
 
-            {sections.map((section) => {
-              const sectionFields = fields.filter(
-                (f) => f.section_local_id === section.local_id,
-              );
-              const collapsed = collapsedSections.has(section.local_id);
+            <DndContext
+              sensors={sensors}
+              collisionDetection={collisionDetection}
+              onDragEnd={handleDragEnd}
+            >
+              <SortableContext
+                items={sections.map((s) => s.local_id)}
+                strategy={verticalListSortingStrategy}
+              >
+                {sections.map((section) => {
+                  const sectionFields = fields.filter(
+                    (f) => f.section_local_id === section.local_id,
+                  );
+                  const collapsed = collapsedSections.has(section.local_id);
 
-              return (
-                <div
-                  key={section.local_id}
-                  className="overflow-hidden rounded-lg border bg-background"
-                >
-                  <div className="flex flex-wrap items-center gap-2 border-b bg-muted/30 px-2 py-1.5">
-                    <button
-                      type="button"
-                      onClick={() => toggleSection(section.local_id)}
-                      className="flex h-7 w-7 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted"
-                      aria-label={collapsed ? "Expandir" : "Recolher"}
-                    >
-                      {collapsed ? (
-                        <ChevronRight className="h-4 w-4" />
-                      ) : (
-                        <ChevronDown className="h-4 w-4" />
-                      )}
-                    </button>
+                  return (
+                    <SortableSectionShell key={section.local_id} id={section.local_id}>
+                      {(dragHandle) => (
+                        <>
+                          <div className="flex flex-wrap items-center gap-2 border-b bg-muted/30 px-2 py-1.5">
+                            {dragHandle}
+                            <button
+                              type="button"
+                              onClick={() => toggleSection(section.local_id)}
+                              className="flex h-7 w-7 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted"
+                              aria-label={collapsed ? "Expandir" : "Recolher"}
+                            >
+                              {collapsed ? (
+                                <ChevronRight className="h-4 w-4" />
+                              ) : (
+                                <ChevronDown className="h-4 w-4" />
+                              )}
+                            </button>
 
-                    <Input
-                      value={section.title}
-                      onChange={(e) =>
-                        updateSection(section.local_id, (s) => ({
-                          ...s,
-                          title: e.target.value,
-                        }))
-                      }
-                      placeholder="Título da seção"
-                      className="h-7 min-w-[12rem] flex-1 border-0 bg-transparent px-1 font-semibold uppercase tracking-wide shadow-none focus-visible:ring-0"
-                    />
-                    <Input
-                      value={section.subtitle ?? ""}
-                      onChange={(e) =>
-                        updateSection(section.local_id, (s) => ({
-                          ...s,
-                          subtitle: e.target.value || null,
-                        }))
-                      }
-                      placeholder="Subtítulo (opcional)"
-                      className="hidden h-7 flex-1 border-0 bg-transparent px-1 italic text-muted-foreground shadow-none focus-visible:ring-0 md:block"
-                    />
+                            <Input
+                              value={section.title}
+                              onChange={(e) =>
+                                updateSection(section.local_id, (s) => ({
+                                  ...s,
+                                  title: e.target.value,
+                                }))
+                              }
+                              placeholder="Título da seção"
+                              className="h-7 min-w-[12rem] flex-1 border-0 bg-transparent px-1 font-semibold uppercase tracking-wide shadow-none focus-visible:ring-0"
+                            />
+                            <Input
+                              value={section.subtitle ?? ""}
+                              onChange={(e) =>
+                                updateSection(section.local_id, (s) => ({
+                                  ...s,
+                                  subtitle: e.target.value || null,
+                                }))
+                              }
+                              placeholder="Subtítulo (opcional)"
+                              className="hidden h-7 flex-1 border-0 bg-transparent px-1 italic text-muted-foreground shadow-none focus-visible:ring-0 md:block"
+                            />
 
-                    <div className="ml-auto flex items-center gap-1.5 pl-2">
-                      <ColumnsPicker
-                        value={section.columns}
-                        onChange={(v) =>
-                          updateSection(section.local_id, (s) => ({
-                            ...s,
-                            columns: v,
-                          }))
-                        }
-                      />
-                      <span className="text-xs text-muted-foreground">
-                        ({sectionFields.length})
-                      </span>
-                      <Button
-                        type="button"
-                        size="icon"
-                        variant="ghost"
-                        className="h-7 w-7 text-muted-foreground hover:text-destructive-foreground"
-                        onClick={() => deleteSection(section.local_id)}
-                        title="Excluir seção"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </Button>
-                    </div>
-                  </div>
-
-                  {!collapsed ? (
-                    <div className="space-y-2 p-2">
-                      {sectionFields.length === 0 ? (
-                        <div className="rounded-md border border-dashed p-4 text-center text-xs text-muted-foreground">
-                          Sem campos nesta seção.
-                        </div>
-                      ) : (
-                        <DndContext
-                          sensors={sensors}
-                          collisionDetection={closestCenter}
-                          onDragEnd={(e) => handleDragEnd(section.local_id, e)}
-                        >
-                          <SortableContext
-                            items={sectionFields.map((f) => f.localId)}
-                            strategy={verticalListSortingStrategy}
-                          >
-                            <div className="space-y-1.5">
-                              {sectionFields.map((field) => (
-                                <FieldAccordionItem
-                                  key={field.localId}
-                                  field={field}
-                                  sections={sections}
-                                  allFields={fields}
-                                  templateId={template.id}
-                                  expanded={expandedFieldLocalId === field.localId}
-                                  autoFocusLabel={justCreatedLocalId === field.localId}
-                                  onToggle={() => toggleField(field.localId)}
-                                  onChange={(updater) =>
-                                    updateField(field.localId, updater)
-                                  }
-                                  onDelete={() => deleteField(field.localId)}
-                                  onDuplicate={() => duplicateField(field.localId)}
-                                  onMoveToSection={(secId) =>
-                                    moveField(field.localId, secId)
-                                  }
-                                />
-                              ))}
+                            <div className="ml-auto flex items-center gap-1.5 pl-2">
+                              <ColumnsPicker
+                                value={section.columns}
+                                onChange={(v) =>
+                                  updateSection(section.local_id, (s) => ({
+                                    ...s,
+                                    columns: v,
+                                  }))
+                                }
+                              />
+                              <span className="text-xs text-muted-foreground">
+                                ({sectionFields.length})
+                              </span>
+                              <Button
+                                type="button"
+                                size="icon"
+                                variant="ghost"
+                                className="h-7 w-7 text-muted-foreground hover:text-destructive-foreground"
+                                onClick={() => deleteSection(section.local_id)}
+                                title="Excluir seção"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </Button>
                             </div>
-                          </SortableContext>
-                        </DndContext>
-                      )}
+                          </div>
 
-                      <AddFieldBar onAdd={(type) => addField(section.local_id, type)} />
-                    </div>
-                  ) : null}
-                </div>
-              );
-            })}
+                          {!collapsed ? (
+                            <div className="space-y-2 p-2">
+                              {sectionFields.length === 0 ? (
+                                <div className="rounded-md border border-dashed p-4 text-center text-xs text-muted-foreground">
+                                  Sem campos nesta seção.
+                                </div>
+                              ) : (
+                                <SortableContext
+                                  items={sectionFields.map((f) => f.localId)}
+                                  strategy={verticalListSortingStrategy}
+                                >
+                                  <div className="space-y-1.5">
+                                    {sectionFields.map((field) => (
+                                      <FieldAccordionItem
+                                        key={field.localId}
+                                        field={field}
+                                        sections={sections}
+                                        allFields={fields}
+                                        templateId={template.id}
+                                        expanded={expandedFieldLocalId === field.localId}
+                                        autoFocusLabel={
+                                          justCreatedLocalId === field.localId
+                                        }
+                                        onToggle={() => toggleField(field.localId)}
+                                        onChange={(updater) =>
+                                          updateField(field.localId, updater)
+                                        }
+                                        onDelete={() => deleteField(field.localId)}
+                                        onDuplicate={() => duplicateField(field.localId)}
+                                        onMoveToSection={(secId) =>
+                                          moveField(field.localId, secId)
+                                        }
+                                      />
+                                    ))}
+                                  </div>
+                                </SortableContext>
+                              )}
+
+                              <AddFieldBar
+                                onAdd={(type) => addField(section.local_id, type)}
+                              />
+                            </div>
+                          ) : null}
+                        </>
+                      )}
+                    </SortableSectionShell>
+                  );
+                })}
+              </SortableContext>
+            </DndContext>
           </div>
         </Panel>
 

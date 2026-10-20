@@ -83,8 +83,8 @@ export default async function TemplatesPage({
                 key={t.id}
                 id={t.id}
                 name={t.name}
+                description={t.description}
                 projectId={null}
-                projectName={null}
                 discipline={discipline ?? null}
                 layoutMode={t.layout_mode}
                 environments={t.environments}
