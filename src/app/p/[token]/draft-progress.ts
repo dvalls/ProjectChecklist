@@ -18,9 +18,15 @@ export interface DraftSubmissionMatrixValue extends DraftSubmissionValue {
   env_key: string;
 }
 
+export interface DraftEnvLink {
+  target: string;
+  source: string;
+}
+
 export interface DraftSubmission {
   values: DraftSubmissionValue[];
   matrix_values: DraftSubmissionMatrixValue[];
+  env_links?: DraftEnvLink[];
   updatedAt: number;
 }
 
@@ -71,6 +77,7 @@ export function readDraftSubmission(
     const parsed = JSON.parse(raw) as Partial<DraftSubmission>;
     const values = Array.isArray(parsed.values) ? parsed.values : [];
     const matrixValues = Array.isArray(parsed.matrix_values) ? parsed.matrix_values : [];
+    const rawLinks = Array.isArray(parsed.env_links) ? parsed.env_links : [];
     return {
       values: values
         .filter((v) => typeof v.field_id === "string")
@@ -87,6 +94,15 @@ export function readDraftSubmission(
           value: typeof v.value === "string" ? v.value : null,
           image_url: typeof v.image_url === "string" ? v.image_url : null,
         })),
+      env_links: rawLinks
+        .filter(
+          (link) =>
+            link &&
+            typeof link.target === "string" &&
+            typeof link.source === "string" &&
+            link.target !== link.source,
+        )
+        .map((link) => ({ target: link.target, source: link.source })),
       updatedAt: parsed.updatedAt ?? 0,
     };
   } catch {

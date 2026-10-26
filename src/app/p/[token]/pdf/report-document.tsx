@@ -12,6 +12,7 @@ import type {
 
 import type { PublicFullReport, ReportTemplateEntry } from "../actions";
 import { formatDateTime, formatFieldValue } from "./format-value";
+import { PdfRichLabel } from "./pdf-rich-label";
 
 const ACCENT = "#475569"; // slate-600 (barras/bordas)
 const ACCENT_DARK = "#1e293b"; // slate-800 (texto forte)
@@ -353,7 +354,10 @@ function FieldRow({
         wrap={false}
         style={[styles.fieldRow, styles.fieldRowStacked, isAlt ? styles.fieldRowAlt : {}]}
       >
-        <Text style={[styles.fieldLabel, styles.fieldLabelStacked]}>{field.label}</Text>
+        <PdfRichLabel
+          html={field.label}
+          style={[styles.fieldLabel, styles.fieldLabelStacked]}
+        />
         <Text style={styles.fieldValue}>{formattedValue}</Text>
         {imgUrl ? (
           // eslint-disable-next-line jsx-a11y/alt-text
@@ -365,7 +369,7 @@ function FieldRow({
 
   return (
     <View wrap={false} style={[styles.fieldRow, isAlt ? styles.fieldRowAlt : {}]}>
-      <Text style={[styles.fieldLabel, { width: "75%" }]}>{field.label}</Text>
+      <PdfRichLabel html={field.label} style={[styles.fieldLabel, { width: "75%" }]} />
       <View style={{ width: "25%" }}>
         <Text style={styles.fieldValue}>{formattedValue}</Text>
         {imgUrl ? (
@@ -472,7 +476,7 @@ function SectionedFields({
                     : [filledEnvs];
                 return (
                   <View key={field.id} style={styles.matrixBlock} wrap={false}>
-                    <Text style={styles.matrixFieldLabel}>{field.label}</Text>
+                    <PdfRichLabel html={field.label} style={styles.matrixFieldLabel} />
                     <View style={{ flexDirection: "row" }}>
                       {envCols.map((envCol, ci) => (
                         <View key={ci} style={{ flex: 1, marginRight: ci < 2 ? 6 : 0 }}>

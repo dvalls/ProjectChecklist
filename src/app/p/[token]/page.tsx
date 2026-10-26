@@ -16,6 +16,7 @@ import type {
 } from "@/lib/supabase/types";
 
 import { InactiveLinkCard } from "./inactive-link-card";
+import { isPreviewMode } from "./preview-mode";
 import { PublicCover } from "./public-cover";
 
 export const dynamic = "force-dynamic";
@@ -69,8 +70,10 @@ export async function generateMetadata({
 
 export default async function PublicChecklistCoverPage({
   params,
+  searchParams,
 }: {
   params: { token: string };
+  searchParams: { preview?: string };
 }) {
   const lookup = await getActivePublicLink(params.token);
   if (lookup.status === "not-found") notFound();
@@ -191,6 +194,7 @@ export default async function PublicChecklistCoverPage({
       history={history}
       officeSettings={officeSettings}
       isProjectOwner={isProjectOwner}
+      preview={isPreviewMode(searchParams.preview)}
     />
   );
 }

@@ -10,6 +10,103 @@ export function makeFieldKey(fieldId: string, env?: string) {
   return env ? `${fieldId}::${env}` : fieldId;
 }
 
+export function splitFieldKey(key: string): { fieldId: string; env?: string } {
+  const idx = key.indexOf("::");
+  if (idx === -1) return { fieldId: key };
+  return { fieldId: key.slice(0, idx), env: key.slice(idx + 2) };
+}
+
+/** Ambiente de destino → ambiente de origem que ele acompanha. */
+export type EnvLinks = Record<string, string>;
+
+export function resolveEnvRoot(env: string, links: EnvLinks): string {
+  let current = env;
+  const seen = new Set<string>();
+  while (links[current] && !seen.has(current)) {
+    seen.add(current);
+    current = links[current];
+  }
+  return current;
+}
+
+/** Grava que `target` acompanha `source`. `source` nulo remove o vínculo.
+ * Se a origem já acompanha o destino, esse ciclo é desfeito. */
+export function linkEnvironment(
+  links: EnvLinks,
+  target: string,
+  source: string | null,
+): EnvLinks {
+  const next: EnvLinks = { ...links };
+  if (!source || source === target) {
+    delete next[target];
+    return next;
+  }
+  next[target] = source;
+  let current = source;
+  const seen = new Set<string>();
+  while (next[current] && !seen.has(current)) {
+    seen.add(current);
+    if (next[current] === target) {
+      delete next[current];
+      break;
+    }
+    current = next[current];
+  }
+  return next;
+}
+
+export function linksFromDraft(
+  links: { target: string; source: string }[] | undefined,
+  environments: string[],
+): EnvLinks {
+  const allowed = new Set(environments);
+  const out: EnvLinks = {};
+  for (const link of links ?? []) {
+    if (!allowed.has(link.target) || !allowed.has(link.source)) continue;
+    if (link.target === link.source) continue;
+    out[link.target] = link.source;
+  }
+  return out;
+}
+
+/** Copia as respostas da origem do grupo para os ambientes igualados.
+ * Com `fieldId`, usa o valor recém-editado nesse ambiente. Sem ele, copia
+ * tudo a partir da origem raiz. */
+export function syncLinkedField({
+  fields,
+  values,
+  environments,
+  links,
+  editedEnv,
+  fieldId,
+  isTargetLocked = () => false,
+}: {
+  fields: Pick<ClFormField, "id" | "type">[];
+  values: Record<string, FieldValue>;
+  environments: string[];
+  links: EnvLinks;
+  editedEnv: string;
+  fieldId?: string;
+  isTargetLocked?: (fieldId: string, env: string) => boolean;
+}): Record<string, FieldValue> {
+  const root = resolveEnvRoot(editedEnv, links);
+  const group = environments.filter((env) => resolveEnvRoot(env, links) === root);
+  if (group.length < 2) return values;
+  const next: Record<string, FieldValue> = { ...values };
+  const selected = fieldId ? fields.filter((field) => field.id === fieldId) : fields;
+  const originEnv = fieldId ? editedEnv : root;
+  for (const field of selected) {
+    if (isDisplayOnly(field.type)) continue;
+    const value = next[makeFieldKey(field.id, originEnv)]?.value ?? null;
+    for (const env of group) {
+      if (env === originEnv) continue;
+      if (isTargetLocked(field.id, env)) continue;
+      next[makeFieldKey(field.id, env)] = { value };
+    }
+  }
+  return next;
+}
+
 export function parseCheckboxGroup(value: string | null): CheckboxGroupValue {
   if (!value) return { selected: [] };
   try {
@@ -95,6 +192,42 @@ export function evaluateVisible(
   }
 
   return true;
+}
+
+export interface CopyEnvironmentResult {
+  values: Record<string, FieldValue>;
+  copiedCells: number;
+  skippedLocked: number;
+}
+
+/** Copia as respostas de um ambiente da matriz para outros. Campos só de exibição
+ * são ignorados. Destinos bloqueados permanecem como estão. */
+export function copyEnvironmentValues(
+  fields: Pick<ClFormField, "id" | "type">[],
+  values: Record<string, FieldValue>,
+  source: string,
+  targets: string[],
+  isTargetLocked: (fieldId: string, env: string) => boolean = () => false,
+): CopyEnvironmentResult {
+  const next: Record<string, FieldValue> = { ...values };
+  let copiedCells = 0;
+  let skippedLocked = 0;
+  const destinations = targets.filter((env) => env !== source);
+
+  for (const field of fields) {
+    if (isDisplayOnly(field.type)) continue;
+    const sourceValue = values[makeFieldKey(field.id, source)]?.value ?? null;
+    for (const target of destinations) {
+      if (isTargetLocked(field.id, target)) {
+        skippedLocked += 1;
+        continue;
+      }
+      next[makeFieldKey(field.id, target)] = { value: sourceValue };
+      copiedCells += 1;
+    }
+  }
+
+  return { values: next, copiedCells, skippedLocked };
 }
 
 export function isFieldAnswered(field: ClFormField, v: FieldValue | undefined): boolean {

@@ -15,14 +15,17 @@ import type {
 import type { PublicOfficeSettings } from "../public-footer";
 
 import { InactiveLinkCard } from "../inactive-link-card";
+import { isPreviewMode } from "../preview-mode";
 import { PublicFormsList } from "./public-forms-list";
 
 export const dynamic = "force-dynamic";
 
 export default async function PublicFormsListPage({
   params,
+  searchParams,
 }: {
   params: { token: string };
+  searchParams: { preview?: string };
 }) {
   const lookup = await getActivePublicLink(params.token);
   if (lookup.status === "not-found") notFound();
@@ -208,6 +211,7 @@ export default async function PublicFormsListPage({
       allowResubmit={allowResubmit}
       officeSettings={officeSettings}
       isProjectOwner={isProjectOwner}
+      preview={isPreviewMode(searchParams.preview)}
     />
   );
 }

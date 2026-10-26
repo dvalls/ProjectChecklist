@@ -111,7 +111,7 @@ export default async function ProjectDetailPage({ params }: { params: { id: stri
             <p className="mt-1 text-sm text-muted-foreground">{project.description}</p>
           ) : null}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <ProjectPublicLinkDialog
             projectId={project.id}
             initialLinks={(links ?? []) as ClPublicLink[]}

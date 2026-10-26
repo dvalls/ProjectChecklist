@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { FileText, Loader2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { RichTextOr } from "@/components/rich-text";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import type { ClFormSection } from "@/lib/supabase/types";
 
@@ -176,7 +177,9 @@ function SummaryContent({ summary }: { summary: PublicSubmissionSummary }) {
                 });
                 return (
                   <div key={field.id} className="rounded-md border p-3 text-sm">
-                    <div className="font-medium">{field.label}</div>
+                    <div className="font-medium">
+                      <RichTextOr html={field.label} />
+                    </div>
                     <dl className="mt-2 grid gap-1 text-xs">
                       {filledEnvs.map((env) => {
                         const v = matrixByKey.get(`${field.id}::${env}`);
@@ -208,7 +211,7 @@ function SummaryContent({ summary }: { summary: PublicSubmissionSummary }) {
                   className="grid grid-cols-[140px_1fr] items-baseline gap-3 rounded-md border px-3 py-1.5 text-sm sm:grid-cols-[200px_1fr]"
                 >
                   <dt className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                    {field.label}
+                    <RichTextOr html={field.label} />
                   </dt>
                   <dd className="leading-tight">
                     {formatFieldValue(field, v?.value ?? null)}

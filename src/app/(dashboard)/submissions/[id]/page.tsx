@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 
 import { BackLink } from "@/components/layout/back-link";
 import { EmptyState } from "@/components/layout/empty-state";
+import { RichTextOr } from "@/components/rich-text";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatDateTime } from "@/lib/format";
@@ -191,7 +192,9 @@ export default async function SubmissionDetailPage({
                       if (isMatrix) {
                         return (
                           <div key={field.id} className="rounded-md border p-3 text-sm">
-                            <div className="font-medium">{field.label}</div>
+                            <div className="font-medium">
+                              <RichTextOr html={field.label} />
+                            </div>
                             <dl className="mt-2 grid gap-1 text-xs">
                               {environments.map((env) => {
                                 const v = matrixByKey.get(`${field.id}::${env}`);
@@ -223,7 +226,7 @@ export default async function SubmissionDetailPage({
                           className="grid grid-cols-[200px_1fr] items-baseline gap-3 rounded-md border p-3 text-sm"
                         >
                           <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                            {field.label}
+                            <RichTextOr html={field.label} />
                           </dt>
                           <dd>
                             {renderValue(field, v?.value ?? null)}

@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import { ArrowLeft, Eye, Loader2, Users } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
+import { RichTextOr } from "@/components/rich-text";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -472,7 +473,9 @@ function SubmissionDetailView({ detail }: { detail: SubmissionDetail }) {
               if (isMatrix) {
                 return (
                   <div key={field.id} className="rounded-md border p-3 text-sm">
-                    <p className="mb-2 font-medium">{field.label}</p>
+                    <div className="mb-2 font-medium">
+                      <RichTextOr html={field.label} />
+                    </div>
                     <dl className="space-y-1 text-xs">
                       {environments.map((env) => {
                         const v = matrixByKey.get(`${field.id}::${env}`);
@@ -504,7 +507,7 @@ function SubmissionDetailView({ detail }: { detail: SubmissionDetail }) {
                   className="grid grid-cols-[200px_1fr] items-baseline gap-3 rounded-md border p-3 text-sm"
                 >
                   <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                    {field.label}
+                    <RichTextOr html={field.label} />
                   </dt>
                   <dd>
                     {formatFieldValue(field, v?.value ?? null)}
@@ -601,7 +604,9 @@ function CompiledView({
             if (isMatrix) {
               return (
                 <div key={field.id} className="rounded-md border p-3 text-sm">
-                  <p className="mb-2 font-medium">{field.label}</p>
+                  <div className="mb-2 font-medium">
+                    <RichTextOr html={field.label} />
+                  </div>
                   <div className="space-y-3">
                     {environments.map((env) => (
                       <div key={env}>
@@ -635,7 +640,9 @@ function CompiledView({
 
             return (
               <div key={field.id} className="rounded-md border p-3 text-sm">
-                <p className="mb-2 font-medium">{field.label}</p>
+                <div className="mb-2 font-medium">
+                  <RichTextOr html={field.label} />
+                </div>
                 <div className="space-y-1">
                   {submissions.map((s) => {
                     const val = s.values.find((v) => v.field_id === field.id);

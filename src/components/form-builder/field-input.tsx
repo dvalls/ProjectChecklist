@@ -2,10 +2,10 @@
 
 import { ImageDisplayField } from "@/components/form-builder/field-preview";
 import { PhotoHintButton } from "@/components/form-builder/photo-hint-button";
+import { FieldHelpText, RichTextOr } from "@/components/rich-text";
 import { ChoiceLabel, RecommendedBadge } from "@/components/form-builder/shared";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -18,6 +18,7 @@ import { Textarea } from "@/components/ui/textarea";
 import type { ClFormField, FieldOptions } from "@/lib/supabase/types";
 
 import type { CheckboxGroupValue, FieldValue } from "@/lib/forms/types";
+import { fieldPlainLabel } from "@/lib/rich-text";
 import {
   parseCheckboxGroup,
   parseRadioOther,
@@ -33,9 +34,9 @@ function InfoFieldView({ field }: { field: ClFormField }) {
 
   return (
     <div className="rounded-md border border-dashed bg-muted/20 p-3">
-      {field.label ? (
+      {fieldPlainLabel(field.label) ? (
         <div className="mb-1 text-xs font-semibold uppercase tracking-wide">
-          {field.label}
+          <RichTextOr html={field.label} />
         </div>
       ) : null}
       {isAllBullets ? (
@@ -97,7 +98,7 @@ export function FieldInputControl({
     <PhotoHintButton
       imagePath={fieldPhoto}
       caption={opts.image_caption ?? null}
-      alt={field.label}
+      alt={fieldPlainLabel(field.label, "Foto de apoio")}
       size="sm"
     />
   ) : null;
@@ -191,19 +192,19 @@ export function FieldInputControl({
     return (
       <div className="space-y-1.5">
         <div className="flex items-center gap-3">
-          <Label className="w-36 shrink-0">
-            {field.label}
-            {field.required ? (
-              <span className="ml-1 text-destructive-foreground">*</span>
-            ) : null}
-          </Label>
+          <div className="w-36 shrink-0 text-sm font-medium leading-snug">
+            <div className="flex min-w-0 items-start gap-1">
+              <RichTextOr html={field.label} />
+              {field.required ? (
+                <span className="text-destructive-foreground">*</span>
+              ) : null}
+            </div>
+          </div>
           {fieldPhotoButton}
           {inputEl}
         </div>
         {selectPhotoEl}
-        {field.help_text ? (
-          <p className="text-xs italic text-muted-foreground">{field.help_text}</p>
-        ) : null}
+        <FieldHelpText html={field.help_text} />
       </div>
     );
   }
@@ -212,18 +213,18 @@ export function FieldInputControl({
     <div className="space-y-1.5">
       {showLabel ? (
         <div className="flex flex-wrap items-center gap-2">
-          <Label>
-            {field.label}
-            {field.required ? (
-              <span className="ml-1 text-destructive-foreground">*</span>
-            ) : null}
-          </Label>
+          <div className="text-sm font-medium leading-snug">
+            <div className="flex min-w-0 items-start gap-1">
+              <RichTextOr html={field.label} />
+              {field.required ? (
+                <span className="text-destructive-foreground">*</span>
+              ) : null}
+            </div>
+          </div>
           {fieldPhotoButton}
         </div>
       ) : null}
-      {showLabel && field.help_text ? (
-        <p className="text-xs italic text-muted-foreground">{field.help_text}</p>
-      ) : null}
+      {showLabel ? <FieldHelpText html={field.help_text} /> : null}
 
       {field.type === "text" ? (
         <Input
@@ -258,25 +259,35 @@ export function FieldInputControl({
 
       {field.type === "checkbox" ? (
         <div className="space-y-1 pt-1">
-          <label className="flex cursor-pointer items-center gap-2">
+          <div className="flex cursor-pointer items-start gap-2">
             <Checkbox
               checked={value?.value === "true"}
               onCheckedChange={(checked) =>
                 onChange({ value: checked ? "true" : "false" })
               }
             />
-            <span className="text-sm">
-              {compact ? "Sim" : field.label}
-              {!compact && field.required ? (
-                <span className="ml-1 text-destructive-foreground">*</span>
-              ) : null}
-            </span>
+            <div className="min-w-0 text-sm">
+              {compact ? (
+                "Sim"
+              ) : (
+                <div
+                  className="flex min-w-0 items-start gap-1"
+                  onClick={(event) => {
+                    if ((event.target as HTMLElement).closest("a")) return;
+                    onChange({ value: value?.value === "true" ? "false" : "true" });
+                  }}
+                >
+                  <RichTextOr html={field.label} />
+                  {field.required ? (
+                    <span className="text-destructive-foreground">*</span>
+                  ) : null}
+                </div>
+              )}
+            </div>
             {!compact ? fieldPhotoButton : null}
             {opts.recommended_value ? <RecommendedBadge /> : null}
-          </label>
-          {!compact && field.help_text ? (
-            <p className="pl-6 text-xs italic text-muted-foreground">{field.help_text}</p>
-          ) : null}
+          </div>
+          {!compact ? <FieldHelpText html={field.help_text} className="pl-6" /> : null}
           {opts.recommended_value && !compact ? (
             <p className="pl-6 text-[11px] text-warning-foreground">
               StudioBIM recomenda:{" "}
@@ -291,10 +302,7 @@ export function FieldInputControl({
           {choices.map((c) => {
             const checked = groupValue.selected.includes(c.value);
             return (
-              <label
-                key={c.value}
-                className="flex cursor-pointer items-center gap-2 text-sm"
-              >
+              <div key={c.value} className="flex items-center gap-2 text-sm">
                 <Checkbox
                   checked={checked}
                   onCheckedChange={(v) => {
@@ -313,7 +321,7 @@ export function FieldInputControl({
                     size="xs"
                   />
                 ) : null}
-              </label>
+              </div>
             );
           })}
           {opts.allow_other ? (
@@ -400,16 +408,13 @@ export function FieldInputControl({
             return (
               <div className="space-y-1.5 pt-1">
                 {choices.map((c) => (
-                  <label
-                    key={c.value}
-                    className="flex cursor-pointer items-start gap-2 text-sm"
-                  >
+                  <div key={c.value} className="flex items-start gap-2 text-sm">
                     <input
                       type="radio"
                       name={radioGroupName ?? field.id}
                       checked={value?.value === c.value}
                       onChange={() => onChange({ value: c.value })}
-                      className="mt-0.5 shrink-0"
+                      className="mt-0.5 shrink-0 cursor-pointer"
                     />
                     <div className="min-w-0">
                       <div className="flex items-center gap-1">
@@ -429,11 +434,11 @@ export function FieldInputControl({
                         </p>
                       ) : null}
                     </div>
-                  </label>
+                  </div>
                 ))}
                 {opts.allow_other ? (
                   <div className="flex items-center gap-2 text-sm">
-                    <label className="flex cursor-pointer items-center gap-2">
+                    <div className="flex items-center gap-2">
                       <input
                         type="radio"
                         name={radioGroupName ?? field.id}
@@ -443,9 +448,10 @@ export function FieldInputControl({
                             value: serializeRadioOther(radioOther?.other ?? ""),
                           })
                         }
+                        className="cursor-pointer"
                       />
                       <span>Outra:</span>
-                    </label>
+                    </div>
                     <Input
                       className="h-8 flex-1"
                       value={radioOther?.other ?? ""}

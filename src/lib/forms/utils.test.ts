@@ -3,12 +3,16 @@ import { describe, expect, it } from "vitest";
 import type { ClFormField, VisibleWhen } from "@/lib/supabase/types";
 
 import {
+  copyEnvironmentValues,
   evaluateVisible,
   isDisplayOnly,
   isFieldAnswered,
+  linkEnvironment,
   makeFieldKey,
   parseCheckboxGroup,
+  resolveEnvRoot,
   serializeCheckboxGroup,
+  syncLinkedField,
 } from "./utils";
 
 describe("isDisplayOnly", () => {
@@ -108,6 +112,77 @@ describe("evaluateVisible", () => {
   it("respects env for keying", () => {
     const cond: VisibleWhen = { field_id: "a", op: "eq", value: "x" };
     expect(evaluateVisible(cond, { "a::env1": { value: "x" } }, "env1")).toBe(true);
+  });
+});
+
+describe("copyEnvironmentValues", () => {
+  const fields = [
+    { id: "a", type: "radio" as const },
+    { id: "b", type: "info" as const },
+    { id: "c", type: "checkbox" as const },
+  ];
+
+  it("copies source answers and skips display-only and locked cells", () => {
+    const values = {
+      "a::Sauna": { value: "quente" },
+      "a::Suite": { value: "fria" },
+      "b::Sauna": { value: "ignorar" },
+      "c::Sauna": { value: "false" },
+      "c::Suite": { value: "true" },
+    };
+    const result = copyEnvironmentValues(
+      fields,
+      values,
+      "Sauna",
+      ["Suite", "Lavabo"],
+      (fieldId, env) => fieldId === "a" && env === "Lavabo",
+    );
+
+    expect(result.values["a::Suite"]).toEqual({ value: "quente" });
+    expect(result.values["a::Sauna"]).toEqual({ value: "quente" });
+    expect(result.values["a::Lavabo"]).toBeUndefined();
+    expect(result.values["b::Suite"]).toBeUndefined();
+    expect(result.values["c::Suite"]).toEqual({ value: "false" });
+    expect(result.values["c::Lavabo"]).toEqual({ value: "false" });
+    expect(result.copiedCells).toBe(3);
+    expect(result.skippedLocked).toBe(1);
+  });
+});
+
+describe("environment links", () => {
+  it("follows the chain to the root and stops on cycles", () => {
+    expect(resolveEnvRoot("Suite", { Suite: "Sauna", Lavabo: "Suite" })).toBe("Sauna");
+    expect(resolveEnvRoot("A", { A: "B", B: "A" })).toBe("A");
+  });
+
+  it("stores the link and breaks a cycle back to the target", () => {
+    const linked = linkEnvironment({ Sauna: "Suite" }, "Suite", "Sauna");
+    expect(linked).toEqual({ Suite: "Sauna" });
+    expect(linkEnvironment(linked, "Suite", null)).toEqual({});
+  });
+
+  it("copies the source answers and later edits onto linked environments", () => {
+    const fields = [{ id: "a", type: "radio" as const }];
+    const links = { Suite: "Sauna" };
+    const copied = syncLinkedField({
+      fields,
+      values: { "a::Sauna": { value: "quente" }, "a::Suite": { value: null } },
+      environments: ["Sauna", "Suite", "Lavabo"],
+      links,
+      editedEnv: "Suite",
+    });
+    expect(copied["a::Suite"]).toEqual({ value: "quente" });
+    expect(copied["a::Lavabo"]).toBeUndefined();
+
+    const edited = syncLinkedField({
+      fields,
+      values: { ...copied, "a::Sauna": { value: "fria" } },
+      environments: ["Sauna", "Suite"],
+      links,
+      editedEnv: "Sauna",
+      fieldId: "a",
+    });
+    expect(edited["a::Suite"]).toEqual({ value: "fria" });
   });
 });
 

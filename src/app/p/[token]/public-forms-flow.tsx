@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { History, Lock, Search, X } from "lucide-react";
+import { toast } from "sonner";
 
 import {
   readDraftSubmission,
@@ -13,12 +14,22 @@ import {
 
 import { ImageDisplayField } from "@/components/form-builder/field-preview";
 import { PhotoHintButton } from "@/components/form-builder/photo-hint-button";
+import { FieldHelpText, RichTextOr } from "@/components/rich-text";
+import {
+  EqualizeColumnSelect,
+  matrixEnvCellClass,
+  matrixEnvHeadClass,
+  matrixLabelCellClass,
+  matrixLabelShadowClass,
+  matrixTableClass,
+  MatrixPanScroll,
+  useHorizontalScrollSync,
+} from "@/components/forms/matrix-tools";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -36,12 +47,18 @@ import type {
 } from "@/lib/supabase/types";
 
 import type { CheckboxGroupValue, FieldValue } from "@/lib/forms/types";
+import { fieldPlainLabel, plainTextFromHtml } from "@/lib/rich-text";
 import {
   evaluateVisible,
+  type EnvLinks,
   isDisplayOnly,
   isFieldAnswered,
+  linkEnvironment,
+  linksFromDraft,
   makeFieldKey,
   parseCheckboxGroup,
+  splitFieldKey,
+  syncLinkedField,
   parseRadioOther,
   serializeCheckboxGroup,
   serializeRadioOther,
@@ -61,6 +78,7 @@ interface Props {
   previousByField?: PreviousValuesMap;
   previousByMatrix?: PreviousMatrixValuesMap;
   allowResubmit?: boolean;
+  preview?: boolean;
 }
 
 type FieldFilter = "all" | "unfilled" | "new" | "filled";
@@ -74,6 +92,7 @@ export function PublicFormsFlow({
   previousByField,
   previousByMatrix,
   allowResubmit = false,
+  preview = false,
 }: Props) {
   const clientName = identity.client_name;
   const clientEmail = identity.client_email;
@@ -89,6 +108,7 @@ export function PublicFormsFlow({
       previousByField={previousByField ?? {}}
       previousByMatrix={previousByMatrix ?? {}}
       allowResubmit={allowResubmit}
+      preview={preview}
     />
   );
 }
@@ -103,6 +123,7 @@ function PublicSubmissionForm({
   previousByField,
   previousByMatrix,
   allowResubmit,
+  preview,
 }: {
   token: string;
   template: ClFormTemplate;
@@ -113,6 +134,7 @@ function PublicSubmissionForm({
   previousByField: PreviousValuesMap;
   previousByMatrix: PreviousMatrixValuesMap;
   allowResubmit: boolean;
+  preview: boolean;
 }) {
   const isMatrix = template.layout_mode === "matrix";
   const environments = useMemo(
@@ -126,6 +148,7 @@ function PublicSubmissionForm({
   );
 
   function getPrevious(fieldId: string, env: string | undefined) {
+    if (preview) return undefined;
     if (env) {
       return previousByMatrix[fieldId]?.[env];
     }
@@ -133,7 +156,9 @@ function PublicSubmissionForm({
   }
 
   const initialValues = useMemo<Record<string, FieldValue>>(() => {
-    const savedDraft = readDraftSubmission(token, template.id, clientEmail);
+    const savedDraft = preview
+      ? null
+      : readDraftSubmission(token, template.id, clientEmail);
     const savedValues = new Map(
       savedDraft?.values.map((v) => [makeFieldKey(v.field_id), v.value]) ?? [],
     );
@@ -167,6 +192,7 @@ function PublicSubmissionForm({
   }, [
     fields,
     isMatrix,
+    preview,
     token,
     template.id,
     clientEmail,
@@ -176,14 +202,56 @@ function PublicSubmissionForm({
   ]);
 
   const [values, setValues] = useState<Record<string, FieldValue>>(initialValues);
+  const [links, setLinks] = useState<EnvLinks>(() => {
+    if (preview) return {};
+    return linksFromDraft(
+      readDraftSubmission(token, template.id, clientEmail)?.env_links,
+      (template.environments ?? []) as string[],
+    );
+  });
+  const linksRef = useRef(links);
+  linksRef.current = links;
   const [filter, setFilter] = useState<FieldFilter>("all");
   const [search, setSearch] = useState("");
+  const scrollSync = useHorizontalScrollSync();
+
+  function isCellLocked(fieldId: string, env: string) {
+    return !allowResubmit && Boolean(previousByMatrix[fieldId]?.[env]);
+  }
 
   function setFieldValue(key: string, patch: Partial<FieldValue>) {
-    setValues((prev) => ({
-      ...prev,
-      [key]: { ...prev[key], ...patch },
-    }));
+    setValues((prev) => {
+      const next = { ...prev, [key]: { ...prev[key], ...patch } };
+      const { fieldId, env } = splitFieldKey(key);
+      if (!env) return next;
+      return syncLinkedField({
+        fields,
+        values: next,
+        environments,
+        links: linksRef.current,
+        editedEnv: env,
+        fieldId,
+        isTargetLocked: isCellLocked,
+      });
+    });
+  }
+
+  function linkColumn(target: string, source: string | null) {
+    const nextLinks = linkEnvironment(linksRef.current, target, source);
+    linksRef.current = nextLinks;
+    setLinks(nextLinks);
+    if (!source) return;
+    setValues((prev) =>
+      syncLinkedField({
+        fields,
+        values: prev,
+        environments,
+        links: nextLinks,
+        editedEnv: target,
+        isTargetLocked: isCellLocked,
+      }),
+    );
+    toast.success(`"${target}" igualado a "${source}".`);
   }
 
   const hasAnyPrevious = useMemo(() => {
@@ -255,6 +323,11 @@ function PublicSubmissionForm({
     [allProgress],
   );
 
+  const hasQuestions = useMemo(
+    () => fields.some((field) => !isDisplayOnly(field.type)),
+    [fields],
+  );
+
   const draftSubmission = useMemo(() => {
     const inputs: DraftSubmissionValue[] = [];
     const matrixInputs: DraftSubmissionMatrixValue[] = [];
@@ -297,11 +370,16 @@ function PublicSubmissionForm({
         }
       }
     }
-    return { values: inputs, matrix_values: matrixInputs };
+    return {
+      values: inputs,
+      matrix_values: matrixInputs,
+      env_links: Object.entries(links).map(([target, source]) => ({ target, source })),
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fields, values, envScope, allowResubmit, previousByField, previousByMatrix]);
+  }, [fields, values, links, envScope, allowResubmit, previousByField, previousByMatrix]);
 
   useEffect(() => {
+    if (preview) return;
     writeDraftProgress(token, template.id, clientEmail, {
       done: progress.done,
       total: progress.total,
@@ -309,10 +387,10 @@ function PublicSubmissionForm({
       totalAll: allProgress.totalAll,
     });
     writeDraftSubmission(token, template.id, clientEmail, draftSubmission);
-  }, [progress, allProgress, draftSubmission, token, template.id, clientEmail]);
+  }, [preview, progress, allProgress, draftSubmission, token, template.id, clientEmail]);
 
   return (
-    <Card className="overflow-hidden">
+    <Card>
       <CardHeader className="p-4 sm:p-6">
         <CardTitle className="text-lg sm:text-xl">{template.name}</CardTitle>
         {template.description ? (
@@ -320,9 +398,11 @@ function PublicSubmissionForm({
             {template.description}
           </p>
         ) : null}
-        <p className="break-words pt-2 text-xs text-muted-foreground">
-          Respondendo como <strong>{clientName}</strong> ({clientEmail})
-        </p>
+        {preview ? null : (
+          <p className="break-words pt-2 text-xs text-muted-foreground">
+            Respondendo como <strong>{clientName}</strong> ({clientEmail})
+          </p>
+        )}
         {progress.total > 0 ? (
           <p className="pt-1 text-xs text-muted-foreground">
             Obrigatórios:{" "}
@@ -367,13 +447,15 @@ function PublicSubmissionForm({
           </p>
         ) : (
           <>
-            <FilterBar
-              filter={filter}
-              counts={filterCounts}
-              onChange={setFilter}
-              search={search}
-              onSearchChange={setSearch}
-            />
+            {hasQuestions ? (
+              <FilterBar
+                filter={filter}
+                counts={filterCounts}
+                onChange={setFilter}
+                search={search}
+                onSearchChange={setSearch}
+              />
+            ) : null}
             {isMatrix ? (
               <MatrixRenderer
                 sections={sections}
@@ -385,6 +467,11 @@ function PublicSubmissionForm({
                 allowResubmit={allowResubmit}
                 filter={filter}
                 search={search}
+                panEnabled={false}
+                scrollSync={scrollSync}
+                scrolled={scrollSync.edge === "mid" || scrollSync.edge === "end"}
+                links={links}
+                onLink={linkColumn}
               />
             ) : (
               <StandardRenderer
@@ -461,8 +548,8 @@ function StandardRenderer({
           const visible = evaluateVisible(field.visible_when, values);
           if (!visible) return false;
           if (needle) {
-            const label = (field.label ?? "").toLowerCase();
-            const help = (field.help_text ?? "").toLowerCase();
+            const label = fieldPlainLabel(field.label).toLowerCase();
+            const help = plainTextFromHtml(field.help_text).toLowerCase();
             if (!label.includes(needle) && !help.includes(needle)) return false;
           }
           if (filter === "all") return true;
@@ -479,9 +566,9 @@ function StandardRenderer({
           <section key={section.id} className="space-y-3">
             {section.title ? (
               <div className="border-b pb-1">
-                <div className="inline-block bg-foreground px-2 py-0.5 text-xs font-semibold uppercase tracking-wide text-background">
+                <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
                   {section.title}
-                </div>
+                </h2>
                 {section.subtitle ? (
                   <p className="mt-1 text-xs italic text-muted-foreground">
                     {section.subtitle}
@@ -542,6 +629,11 @@ function MatrixRenderer({
   allowResubmit,
   filter,
   search,
+  panEnabled,
+  scrollSync,
+  scrolled,
+  links,
+  onLink,
 }: {
   sections: ClFormSection[];
   fields: ClFormField[];
@@ -552,13 +644,18 @@ function MatrixRenderer({
   allowResubmit: boolean;
   filter: FieldFilter;
   search: string;
+  panEnabled: boolean;
+  scrollSync: ReturnType<typeof useHorizontalScrollSync>;
+  scrolled: boolean;
+  links: EnvLinks;
+  onLink: (target: string, source: string | null) => void;
 }) {
   const needle = search.trim().toLowerCase();
   const rows = fields.filter((f) => {
     if (isDisplayOnly(f.type)) return false;
     if (!needle) return true;
-    const label = (f.label ?? "").toLowerCase();
-    const help = (f.help_text ?? "").toLowerCase();
+    const label = fieldPlainLabel(f.label).toLowerCase();
+    const help = plainTextFromHtml(f.help_text).toLowerCase();
     return label.includes(needle) || help.includes(needle);
   });
 
@@ -595,26 +692,43 @@ function MatrixRenderer({
         return (
           <div key={section.id} className="space-y-2">
             {section.title ? (
-              <div className="inline-block bg-foreground px-2 py-0.5 text-xs font-semibold uppercase tracking-wide text-background">
+              <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
                 {section.title}
-              </div>
+              </h2>
             ) : null}
             <p className="text-[11px] text-muted-foreground md:hidden">
               Deslize a tabela para o lado para ver todos os ambientes.
             </p>
-            <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
-              <table className="w-full min-w-[720px] border-separate border-spacing-0">
+            <MatrixPanScroll
+              panEnabled={panEnabled}
+              register={scrollSync.register}
+              onScrollSync={scrollSync.onScroll}
+              publish={scrollSync.publish}
+              className="-mx-4 px-4 sm:mx-0 sm:px-0"
+            >
+              <table className={matrixTableClass}>
                 <thead>
-                  <tr>
-                    <th className="sticky left-0 z-10 w-[200px] bg-background p-2 text-left text-xs italic text-muted-foreground">
+                  <tr className="select-none">
+                    <th
+                      className={
+                        matrixLabelCellClass +
+                        " text-left text-xs italic text-muted-foreground" +
+                        (scrolled ? " " + matrixLabelShadowClass : "")
+                      }
+                    >
                       Ambiente
                     </th>
                     {environments.map((env) => (
-                      <th
-                        key={env}
-                        className="border-l p-2 text-left text-xs font-semibold uppercase tracking-wide"
-                      >
-                        {env}
+                      <th key={env} className={matrixEnvHeadClass}>
+                        <div className="break-words leading-snug">{env}</div>
+                        {environments.length > 1 ? (
+                          <EqualizeColumnSelect
+                            env={env}
+                            environments={environments}
+                            linkedTo={links[env] ?? null}
+                            onChange={(source) => onLink(env, source)}
+                          />
+                        ) : null}
                       </th>
                     ))}
                   </tr>
@@ -626,9 +740,18 @@ function MatrixRenderer({
                     const fieldImage = fieldOpts.image_url ?? null;
                     return (
                       <tr key={field.id} className="align-top">
-                        <td className="sticky left-0 z-10 w-[200px] bg-background p-2 text-sm">
-                          <div className="flex flex-wrap items-center gap-1.5 font-medium">
-                            <span>{field.label}</span>
+                        <td
+                          className={
+                            matrixLabelCellClass +
+                            " text-sm" +
+                            (scrolled ? " " + matrixLabelShadowClass : "")
+                          }
+                        >
+                          <div className="flex flex-wrap items-start gap-1.5 font-medium">
+                            <RichTextOr
+                              html={field.label}
+                              className="text-sm leading-snug"
+                            />
                             {field.required ? (
                               <span className="text-destructive-foreground">*</span>
                             ) : null}
@@ -636,16 +759,12 @@ function MatrixRenderer({
                               <PhotoHintButton
                                 imagePath={fieldImage}
                                 caption={fieldOpts.image_caption ?? null}
-                                alt={field.label}
+                                alt={fieldPlainLabel(field.label, "Foto de apoio")}
                                 size="xs"
                               />
                             ) : null}
                           </div>
-                          {field.help_text ? (
-                            <div className="text-xs italic text-muted-foreground">
-                              {field.help_text}
-                            </div>
-                          ) : null}
+                          <FieldHelpText html={field.help_text} />
                         </td>
                         {environments.map((env) => {
                           const key = makeFieldKey(field.id, env);
@@ -656,24 +775,29 @@ function MatrixRenderer({
                           );
                           const hasPrevious = Boolean(previousByMatrix[field.id]?.[env]);
                           const locked = hasPrevious && !allowResubmit;
+                          const mirrored = Boolean(links[env]);
                           return (
                             <td
                               key={env}
                               className={
-                                "border-l border-t p-2 align-top" +
-                                (hasPrevious ? " bg-muted/30" : "")
+                                matrixEnvCellClass + (hasPrevious ? " bg-muted/30" : "")
                               }
                             >
                               {visible ? (
-                                <FieldInput
-                                  field={field}
-                                  value={values[key]}
-                                  compact
-                                  hasPrevious={hasPrevious}
-                                  locked={locked}
-                                  radioGroupName={key}
-                                  onChange={(patch) => onChange(key, patch)}
-                                />
+                                <fieldset
+                                  disabled={mirrored}
+                                  className="m-0 min-w-0 border-0 p-0 disabled:opacity-100"
+                                >
+                                  <FieldInput
+                                    field={field}
+                                    value={values[key]}
+                                    compact
+                                    hasPrevious={hasPrevious}
+                                    locked={locked}
+                                    radioGroupName={key}
+                                    onChange={(patch) => onChange(key, patch)}
+                                  />
+                                </fieldset>
                               ) : (
                                 <span className="text-xs text-muted-foreground">—</span>
                               )}
@@ -685,7 +809,7 @@ function MatrixRenderer({
                   })}
                 </tbody>
               </table>
-            </div>
+            </MatrixPanScroll>
           </div>
         );
       })}
@@ -715,58 +839,60 @@ function FilterBar({
   ];
 
   return (
-    <div className="sticky top-0 z-20 -mx-4 flex flex-wrap items-center gap-2 border-b bg-background/95 px-4 py-2 backdrop-blur supports-[backdrop-filter]:bg-background/80 sm:mx-0 sm:rounded-md sm:border sm:px-3">
-      <span className="text-xs font-medium text-muted-foreground">Filtrar:</span>
-      <div className="flex flex-wrap gap-1.5">
-        {options.map((opt) => {
-          const active = filter === opt.key;
-          return (
-            <Button
-              key={opt.key}
-              type="button"
-              size="sm"
-              variant={active ? "default" : "outline"}
-              onClick={() => onChange(opt.key)}
-              className="h-8"
-            >
-              <span>{opt.label}</span>
-              <span
-                className={
-                  "ml-2 inline-flex min-w-[1.25rem] items-center justify-center rounded-full px-1.5 text-[10px] font-semibold " +
-                  (active
-                    ? "bg-primary-foreground/20 text-primary-foreground"
-                    : "bg-muted text-muted-foreground")
-                }
+    <div className="sticky top-0 z-20 -mx-4 border-b bg-background/95 px-4 py-2 backdrop-blur supports-[backdrop-filter]:bg-background/80 sm:mx-0 sm:rounded-md sm:border sm:px-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs font-medium text-muted-foreground">Filtrar:</span>
+        <div className="flex flex-wrap gap-1.5">
+          {options.map((opt) => {
+            const active = filter === opt.key;
+            return (
+              <Button
+                key={opt.key}
+                type="button"
+                size="sm"
+                variant={active ? "default" : "outline"}
+                onClick={() => onChange(opt.key)}
+                className="h-8"
               >
-                {counts[opt.key]}
-              </span>
-            </Button>
-          );
-        })}
-      </div>
-      <div className="relative ml-auto w-full sm:w-48">
-        <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-        <input
-          ref={inputRef}
-          type="text"
-          value={search}
-          onChange={(e) => onSearchChange(e.target.value)}
-          placeholder="Buscar..."
-          className="h-8 w-full rounded-md border bg-background pl-8 pr-8 text-sm outline-none ring-offset-background placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-        />
-        {search ? (
-          <button
-            type="button"
-            onClick={() => {
-              onSearchChange("");
-              inputRef.current?.focus();
-            }}
-            className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-            aria-label="Limpar busca"
-          >
-            <X className="h-3.5 w-3.5" />
-          </button>
-        ) : null}
+                <span>{opt.label}</span>
+                <span
+                  className={
+                    "ml-2 inline-flex min-w-[1.25rem] items-center justify-center rounded-full px-1.5 text-[10px] font-semibold " +
+                    (active
+                      ? "bg-primary-foreground/20 text-primary-foreground"
+                      : "bg-muted text-muted-foreground")
+                  }
+                >
+                  {counts[opt.key]}
+                </span>
+              </Button>
+            );
+          })}
+        </div>
+        <div className="relative ml-auto w-full sm:w-48">
+          <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+          <input
+            ref={inputRef}
+            type="text"
+            value={search}
+            onChange={(e) => onSearchChange(e.target.value)}
+            placeholder="Buscar..."
+            className="h-8 w-full rounded-md border bg-background pl-8 pr-8 text-sm outline-none ring-offset-background placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+          />
+          {search ? (
+            <button
+              type="button"
+              onClick={() => {
+                onSearchChange("");
+                inputRef.current?.focus();
+              }}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+              aria-label="Limpar busca"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          ) : null}
+        </div>
       </div>
     </div>
   );
@@ -780,9 +906,9 @@ function InfoFieldView({ field }: { field: ClFormField }) {
 
   return (
     <div className="rounded-md border border-dashed bg-muted/20 p-3">
-      {field.label ? (
+      {fieldPlainLabel(field.label) ? (
         <div className="mb-1 text-xs font-semibold uppercase tracking-wide">
-          {field.label}
+          <RichTextOr html={field.label} />
         </div>
       ) : null}
       {isAllBullets ? (
@@ -864,7 +990,7 @@ function FieldInput({
     <PhotoHintButton
       imagePath={fieldPhoto}
       caption={opts.image_caption ?? null}
-      alt={field.label}
+      alt={fieldPlainLabel(field.label, "Foto de apoio")}
       size="sm"
     />
   ) : null;
@@ -964,21 +1090,23 @@ function FieldInput({
 
     return (
       <div className={containerClassName}>
-        <div className="flex items-center gap-3">
-          <Label className="w-36 shrink-0">
-            {field.label}
-            {field.required ? (
-              <span className="ml-1 text-destructive-foreground">*</span>
-            ) : null}
-          </Label>
+        <div className="flex items-start gap-3">
+          <div className="w-36 shrink-0 text-sm font-medium leading-snug">
+            <div className="flex min-w-0 items-start gap-1">
+              <RichTextOr html={field.label} />
+              {field.required ? (
+                <span className="text-destructive-foreground">*</span>
+              ) : null}
+            </div>
+          </div>
           {fieldPhotoButton}
-          {inputEl}
+          <div className="min-w-0 flex-1 space-y-1.5">
+            {inputEl}
+            {previousBadge ? <div className="flex">{previousBadge}</div> : null}
+          </div>
         </div>
-        {previousBadge ? <div className="flex">{previousBadge}</div> : null}
         {selectPhotoEl}
-        {field.help_text ? (
-          <p className="text-xs italic text-muted-foreground">{field.help_text}</p>
-        ) : null}
+        <FieldHelpText html={field.help_text} />
       </div>
     );
   }
@@ -986,22 +1114,20 @@ function FieldInput({
   return (
     <div className={containerClassName}>
       {showLabel ? (
-        <div className="flex flex-wrap items-center gap-2">
-          <Label>
-            {field.label}
+        <div className="flex flex-wrap items-start gap-2">
+          <div className="flex min-w-0 items-start gap-1 text-sm font-medium leading-snug">
+            <RichTextOr html={field.label} />
             {field.required ? (
-              <span className="ml-1 text-destructive-foreground">*</span>
+              <span className="text-destructive-foreground">*</span>
             ) : null}
-          </Label>
+          </div>
           {fieldPhotoButton}
           {previousBadge}
         </div>
       ) : previousBadge && field.type !== "checkbox" ? (
         <div className="flex">{previousBadge}</div>
       ) : null}
-      {showLabel && field.help_text ? (
-        <p className="text-xs italic text-muted-foreground">{field.help_text}</p>
-      ) : null}
+      {showLabel ? <FieldHelpText html={field.help_text} /> : null}
 
       {field.type === "text" ? (
         <Input
@@ -1044,10 +1170,9 @@ function FieldInput({
 
       {field.type === "checkbox" ? (
         <div className="space-y-1 pt-1">
-          <label
+          <div
             className={
-              "flex flex-wrap items-center gap-2 " +
-              (locked ? "cursor-not-allowed" : "cursor-pointer")
+              "flex flex-wrap items-start gap-2 " + (locked ? "cursor-not-allowed" : "")
             }
           >
             <Checkbox
@@ -1057,18 +1182,29 @@ function FieldInput({
                 onChange({ value: checked ? "true" : "false" })
               }
             />
-            <span className="text-sm">
-              {compact ? "Sim" : field.label}
-              {!compact && field.required ? (
-                <span className="ml-1 text-destructive-foreground">*</span>
-              ) : null}
-            </span>
+            <div className="min-w-0 text-sm">
+              {compact ? (
+                "Sim"
+              ) : (
+                <div
+                  className="flex min-w-0 items-start gap-1"
+                  onClick={(event) => {
+                    if (locked) return;
+                    if ((event.target as HTMLElement).closest("a")) return;
+                    onChange({ value: value?.value === "true" ? "false" : "true" });
+                  }}
+                >
+                  <RichTextOr html={field.label} />
+                  {field.required ? (
+                    <span className="text-destructive-foreground">*</span>
+                  ) : null}
+                </div>
+              )}
+            </div>
             {!compact ? fieldPhotoButton : null}
             {previousBadge}
-          </label>
-          {!compact && field.help_text ? (
-            <p className="pl-6 text-xs italic text-muted-foreground">{field.help_text}</p>
-          ) : null}
+          </div>
+          {!compact ? <FieldHelpText html={field.help_text} className="pl-6" /> : null}
         </div>
       ) : null}
 
@@ -1077,11 +1213,10 @@ function FieldInput({
           {choices.map((c) => {
             const checked = groupValue.selected.includes(c.value);
             return (
-              <label
+              <div
                 key={c.value}
                 className={
-                  "flex min-w-0 gap-2 text-sm " +
-                  (locked ? "cursor-not-allowed" : "cursor-pointer")
+                  "flex min-w-0 gap-2 text-sm " + (locked ? "cursor-not-allowed" : "")
                 }
               >
                 <Checkbox
@@ -1113,7 +1248,7 @@ function FieldInput({
                     </span>
                   ) : null}
                 </span>
-              </label>
+              </div>
             );
           })}
           {opts.allow_other ? (
@@ -1203,11 +1338,11 @@ function FieldInput({
             return (
               <div className="space-y-1.5 pt-1">
                 {choices.map((c) => (
-                  <label
+                  <div
                     key={c.value}
                     className={
                       "flex min-w-0 items-start gap-2 text-sm " +
-                      (locked ? "cursor-not-allowed" : "cursor-pointer")
+                      (locked ? "cursor-not-allowed" : "")
                     }
                   >
                     <input
@@ -1216,7 +1351,7 @@ function FieldInput({
                       checked={value?.value === c.value}
                       disabled={locked}
                       onChange={() => onChange({ value: c.value })}
-                      className="mt-0.5 shrink-0"
+                      className="mt-0.5 shrink-0 cursor-pointer"
                     />
                     <div className="min-w-0">
                       <div className="flex items-center gap-1">
@@ -1236,14 +1371,14 @@ function FieldInput({
                         </p>
                       ) : null}
                     </div>
-                  </label>
+                  </div>
                 ))}
                 {opts.allow_other ? (
                   <div className="flex flex-col gap-2 text-sm sm:flex-row sm:items-center">
-                    <label
+                    <div
                       className={
                         "flex shrink-0 items-center gap-2 " +
-                        (locked ? "cursor-not-allowed" : "cursor-pointer")
+                        (locked ? "cursor-not-allowed" : "")
                       }
                     >
                       <input
@@ -1256,9 +1391,10 @@ function FieldInput({
                             value: serializeRadioOther(radioOther?.other ?? ""),
                           })
                         }
+                        className="cursor-pointer"
                       />
                       <span>Outra:</span>
-                    </label>
+                    </div>
                     <Input
                       className="h-8 flex-1"
                       value={radioOther?.other ?? ""}

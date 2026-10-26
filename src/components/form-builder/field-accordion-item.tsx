@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import {
@@ -49,6 +49,9 @@ import type {
   SectionColumns,
 } from "@/lib/supabase/types";
 
+import { fieldPlainLabel } from "@/lib/rich-text";
+
+import { InlineHtmlEditor } from "./inline-html-editor";
 import { PhotoHintEditor } from "./photo-hint-editor";
 import type { EditorField, EditorSection } from "./template-builder";
 import {
@@ -96,13 +99,7 @@ export function FieldAccordionItem({
     useSortable({ id: field.localId });
 
   const [advancedOpen, setAdvancedOpen] = useState(false);
-  const labelInputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    if (expanded && autoFocusLabel) {
-      requestAnimationFrame(() => labelInputRef.current?.focus());
-    }
-  }, [expanded, autoFocusLabel]);
+  const labelText = fieldPlainLabel(field.label);
 
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -187,10 +184,10 @@ export function FieldAccordionItem({
             <span
               className={cn(
                 "truncate text-sm",
-                field.label ? "font-medium" : "italic text-muted-foreground",
+                labelText ? "font-medium" : "italic text-muted-foreground",
               )}
             >
-              {field.label || "(sem label)"}
+              {labelText || "(sem label)"}
             </span>
             {field.required && !isDisplayOnly ? (
               <Asterisk
@@ -279,24 +276,6 @@ export function FieldAccordionItem({
           onClick={(e) => e.stopPropagation()}
         >
           <div className="space-y-1.5">
-            <Label className="text-xs">
-              {isDisplayOnly ? "Título (opcional)" : "Pergunta / Label"}
-            </Label>
-            <Input
-              ref={labelInputRef}
-              value={field.label}
-              onChange={(e) => onChange((f) => ({ ...f, label: e.target.value }))}
-              placeholder={
-                isInfo
-                  ? "Ex.: Observações"
-                  : isImage
-                    ? "Ex.: Planta baixa"
-                    : "Ex.: Tamanho do ambiente"
-              }
-            />
-          </div>
-
-          <div className="space-y-1.5">
             <Label className="text-xs">Tipo de campo</Label>
             <TypePicker
               value={field.type}
@@ -339,6 +318,25 @@ export function FieldAccordionItem({
                           : photoHint,
                   };
                 })
+              }
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <Label className="text-xs">
+              {isDisplayOnly ? "Título (opcional)" : "Pergunta / Label"}
+            </Label>
+            <InlineHtmlEditor
+              value={field.label}
+              tall={field.type === "textarea"}
+              autoFocus={expanded && Boolean(autoFocusLabel)}
+              onChange={(html) => onChange((f) => ({ ...f, label: html }))}
+              placeholder={
+                isInfo
+                  ? "Ex.: Observações"
+                  : isImage
+                    ? "Ex.: Planta baixa"
+                    : "Ex.: Tamanho do ambiente"
               }
             />
           </div>
@@ -642,12 +640,12 @@ export function FieldAccordionItem({
                 <div className="space-y-3 px-3 py-3">
                   <div className="space-y-1.5">
                     <Label className="text-xs">Texto de ajuda</Label>
-                    <Input
+                    <InlineHtmlEditor
                       value={field.help_text ?? ""}
-                      onChange={(e) =>
+                      onChange={(html) =>
                         onChange((f) => ({
                           ...f,
-                          help_text: e.target.value || null,
+                          help_text: html || null,
                         }))
                       }
                       placeholder="Instrução auxiliar (opcional)"
@@ -697,7 +695,7 @@ export function FieldAccordionItem({
                             ) : (
                               triggerCandidates.map((f) => (
                                 <SelectItem key={f.localId} value={f.localId}>
-                                  {f.label || "(sem label)"}
+                                  {fieldPlainLabel(f.label, "(sem label)")}
                                 </SelectItem>
                               ))
                             )}

@@ -58,6 +58,10 @@ export function ProjectPublicLinkDialog({ projectId, initialLinks, templates }: 
     return `${origin}/p/${token}`;
   }
 
+  function buildPreviewUrl(token: string) {
+    return `${buildUrl(token)}?preview=1`;
+  }
+
   function handleCreate() {
     startCreating(async () => {
       const res = await createProjectPublicLink(projectId);
@@ -157,6 +161,21 @@ export function ProjectPublicLinkDialog({ projectId, initialLinks, templates }: 
               Abrir
             </a>
           </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            title="Visualizar o formulário sem gravar respostas"
+            asChild
+          >
+            <a
+              href={buildPreviewUrl(activeLink.token)}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              <Eye className="mr-2 h-4 w-4" />
+              Visualizar
+            </a>
+          </Button>
         </>
       ) : null}
       <Dialog open={open} onOpenChange={setOpen}>
@@ -218,6 +237,21 @@ export function ProjectPublicLinkDialog({ projectId, initialLinks, templates }: 
                           <a href={url} target="_blank" rel="noopener noreferrer">
                             <ExternalLink className="mr-1 h-3.5 w-3.5" />
                             Abrir
+                          </a>
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          title="Visualizar o formulário sem gravar respostas"
+                          asChild
+                        >
+                          <a
+                            href={buildPreviewUrl(link.token)}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                          >
+                            <Eye className="mr-1 h-3.5 w-3.5" />
+                            Visualizar
                           </a>
                         </Button>
                         <div className="ml-auto flex items-center gap-1.5 px-2">

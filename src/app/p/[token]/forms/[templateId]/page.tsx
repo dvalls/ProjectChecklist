@@ -13,6 +13,7 @@ import type {
 import type { PublicOfficeSettings } from "../../public-footer";
 
 import { InactiveLinkCard } from "../../inactive-link-card";
+import { isPreviewMode } from "../../preview-mode";
 import {
   PublicFillWrapper,
   type PreviousFieldValue,
@@ -24,8 +25,10 @@ export const dynamic = "force-dynamic";
 
 export default async function PublicFormFillPage({
   params,
+  searchParams,
 }: {
   params: { token: string; templateId: string };
+  searchParams: { preview?: string };
 }) {
   const lookup = await getActivePublicLink(params.token);
   if (lookup.status === "not-found") notFound();
@@ -145,6 +148,7 @@ export default async function PublicFormFillPage({
   }
 
   const allowResubmit = Boolean(typedProject.allow_resubmit_answers);
+  const preview = isPreviewMode(searchParams.preview);
 
   return (
     <PublicFillWrapper
@@ -153,9 +157,10 @@ export default async function PublicFormFillPage({
       sections={(sections ?? []) as ClFormSection[]}
       fields={(fields ?? []) as ClFormField[]}
       officeSettings={officeSettings}
-      previousByField={previousByField}
-      previousByMatrix={previousByMatrix}
+      previousByField={preview ? {} : previousByField}
+      previousByMatrix={preview ? {} : previousByMatrix}
       allowResubmit={allowResubmit}
+      preview={preview}
     />
   );
 }

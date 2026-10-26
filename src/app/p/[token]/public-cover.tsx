@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect, useState, useTransition } from "react";
-import { Clock, ImageIcon, Play, Trash2, User } from "lucide-react";
+import { Clock, Eye, ImageIcon, Play, Trash2, User } from "lucide-react";
 import { toast } from "sonner";
 
 import {
@@ -35,6 +35,8 @@ import { deletePublicSubmission } from "./actions";
 import { clearDraftProgress, clearDraftSubmission } from "./draft-progress";
 import { readIdentity, writeIdentity } from "./identity-storage";
 import { DownloadFullReportButton } from "./pdf/download-buttons";
+import { PreviewBanner } from "./preview-banner";
+import { withPreview } from "./preview-mode";
 import { PublicFooter, type PublicOfficeSettings } from "./public-footer";
 import { PublicSubmissionSummaryDialog } from "./public-submission-summary-dialog";
 
@@ -90,6 +92,7 @@ interface Props {
   history: PublicSubmissionHistoryItem[];
   officeSettings: PublicOfficeSettings | null;
   isProjectOwner: boolean;
+  preview?: boolean;
 }
 
 function initials(name: string | null, email: string | null) {
@@ -106,6 +109,7 @@ export function PublicCover({
   history,
   officeSettings,
   isProjectOwner,
+  preview = false,
 }: Props) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -154,6 +158,10 @@ export function PublicCover({
   }
 
   function handleStart() {
+    if (preview) {
+      router.push(withPreview(`/p/${token}/forms`, true));
+      return;
+    }
     const saved = readIdentity(token);
     if (saved) {
       router.push(`/p/${token}/forms`);
@@ -263,15 +271,26 @@ export function PublicCover({
             </section>
           ) : null}
 
+          {preview ? <PreviewBanner /> : null}
+
           <div className="mb-8 flex justify-stretch sm:justify-end">
             <Button
               size="lg"
               onClick={handleStart}
               disabled={formCount === 0}
-              className="group w-full animate-glow-pulse transition-all duration-200 hover:scale-105 active:scale-95 sm:w-auto"
+              variant={preview ? "outline" : "default"}
+              className={
+                preview
+                  ? "w-full sm:w-auto"
+                  : "group w-full animate-glow-pulse transition-all duration-200 hover:scale-105 active:scale-95 sm:w-auto"
+              }
             >
-              <Play className="mr-2 h-4 w-4 transition-transform duration-200 group-hover:translate-x-0.5" />
-              Iniciar preenchimento
+              {preview ? (
+                <Eye className="mr-2 h-4 w-4" />
+              ) : (
+                <Play className="mr-2 h-4 w-4 transition-transform duration-200 group-hover:translate-x-0.5" />
+              )}
+              {preview ? "Visualizar formulários" : "Iniciar preenchimento"}
             </Button>
           </div>
 

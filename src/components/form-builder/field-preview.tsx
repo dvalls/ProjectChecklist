@@ -2,9 +2,10 @@
 
 import { CalendarIcon, EyeOff, Image as ImageIcon, Info } from "lucide-react";
 
+import { FieldHelpText, RichTextOr } from "@/components/rich-text";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { fieldPlainLabel } from "@/lib/rich-text";
 import {
   Select,
   SelectContent,
@@ -51,8 +52,8 @@ export function FieldPreview({
     return (
       <div className="rounded-md border border-dashed bg-muted/20 p-3">
         <div className="mb-1 flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-          <Info className="h-3.5 w-3.5" />
-          {field.label || "Informação"}
+          <Info className="h-3.5 w-3.5 shrink-0" />
+          <RichTextOr html={field.label} fallback="Informação" />
         </div>
         <InfoBlock content={opts.content ?? field.help_text ?? ""} />
       </div>
@@ -77,18 +78,24 @@ export function FieldPreview({
     <div className={`space-y-1.5 ${hidden ? "opacity-60" : ""}`}>
       {field.type !== "checkbox" ? (
         <>
-          <div className="flex items-center gap-2">
-            <Label>
-              {field.label || "(sem label)"}
+          <div className="flex items-start gap-2">
+            <div className="flex min-w-0 items-start gap-1">
+              <RichTextOr
+                html={field.label}
+                fallback="(sem label)"
+                className="text-sm font-medium leading-snug"
+              />
               {field.required ? (
-                <span className="ml-1 text-destructive-foreground">*</span>
+                <span className="text-sm leading-snug text-destructive-foreground">
+                  *
+                </span>
               ) : null}
-            </Label>
+            </div>
             {fieldImagePath ? (
               <PhotoHintButton
                 imagePath={fieldImagePath}
                 caption={opts.image_caption ?? null}
-                alt={field.label || "Foto de apoio"}
+                alt={fieldPlainLabel(field.label, "Foto de apoio")}
                 size="xs"
               />
             ) : null}
@@ -101,9 +108,7 @@ export function FieldPreview({
               </span>
             ) : null}
           </div>
-          {field.help_text ? (
-            <p className="text-xs italic text-muted-foreground">{field.help_text}</p>
-          ) : null}
+          <FieldHelpText html={field.help_text} />
         </>
       ) : null}
 
@@ -122,17 +127,17 @@ export function FieldPreview({
         <div className="space-y-1">
           <div className="flex items-center gap-2">
             <Checkbox disabled />
-            <span className="text-sm text-muted-foreground">
-              {field.label || "Marcar"}
+            <div className="flex min-w-0 items-start gap-1 text-sm text-muted-foreground">
+              <RichTextOr html={field.label} fallback="Marcar" />
               {field.required ? (
-                <span className="ml-1 text-destructive-foreground">*</span>
+                <span className="text-destructive-foreground">*</span>
               ) : null}
-            </span>
+            </div>
             {fieldImagePath ? (
               <PhotoHintButton
                 imagePath={fieldImagePath}
                 caption={opts.image_caption ?? null}
-                alt={field.label || "Foto de apoio"}
+                alt={fieldPlainLabel(field.label, "Foto de apoio")}
                 size="xs"
               />
             ) : null}
@@ -146,9 +151,7 @@ export function FieldPreview({
             ) : null}
             {opts.recommended_value ? <RecommendedBadge /> : null}
           </div>
-          {field.help_text ? (
-            <p className="pl-6 text-xs italic text-muted-foreground">{field.help_text}</p>
-          ) : null}
+          <FieldHelpText html={field.help_text} className="pl-6" />
           {opts.recommended_value ? (
             <p className="pl-6 text-[11px] text-warning-foreground">
               StudioBIM recomenda:{" "}
@@ -287,13 +290,15 @@ export function ImageDisplayField({
 }) {
   const publicUrl = getTemplateAssetPublicUrl(imageUrl);
   const href = link && link.trim() ? link.trim() : (publicUrl ?? null);
+  const labelText = fieldPlainLabel(label);
 
   return (
     <figure className={`space-y-1.5 ${hidden ? "opacity-60" : ""}`}>
-      {label ? (
-        <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-          {label}
-        </div>
+      {labelText ? (
+        <RichTextOr
+          html={label}
+          className="text-xs font-medium uppercase tracking-wide text-muted-foreground"
+        />
       ) : null}
       {publicUrl ? (
         href ? (
@@ -306,7 +311,7 @@ export function ImageDisplayField({
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src={publicUrl}
-              alt={caption ?? label ?? "Imagem do formulário"}
+              alt={caption ?? (labelText || "Imagem do formulário")}
               className="h-auto w-full object-contain"
             />
           </a>
@@ -315,7 +320,7 @@ export function ImageDisplayField({
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src={publicUrl}
-              alt={caption ?? label ?? "Imagem do formulário"}
+              alt={caption ?? (labelText || "Imagem do formulário")}
               className="h-auto w-full object-contain"
             />
           </div>

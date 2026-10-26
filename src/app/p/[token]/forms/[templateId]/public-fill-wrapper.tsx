@@ -9,6 +9,8 @@ import { ThemeToggle } from "@/components/layout/theme-toggle";
 import type { ClFormField, ClFormSection, ClFormTemplate } from "@/lib/supabase/types";
 
 import { readIdentity, type PublicIdentity } from "../../identity-storage";
+import { PreviewBanner } from "../../preview-banner";
+import { PREVIEW_IDENTITY, withPreview } from "../../preview-mode";
 import { PublicFooter, type PublicOfficeSettings } from "../../public-footer";
 import { PublicFormsFlow } from "../../public-forms-flow";
 
@@ -30,6 +32,7 @@ interface Props {
   previousByField: PreviousValuesMap;
   previousByMatrix: PreviousMatrixValuesMap;
   allowResubmit: boolean;
+  preview?: boolean;
 }
 
 export function PublicFillWrapper({
@@ -41,12 +44,18 @@ export function PublicFillWrapper({
   previousByField,
   previousByMatrix,
   allowResubmit,
+  preview = false,
 }: Props) {
   const router = useRouter();
   const [identity, setIdentity] = useState<PublicIdentity | null>(null);
   const [hydrated, setHydrated] = useState(false);
 
   useEffect(() => {
+    if (preview) {
+      setIdentity(PREVIEW_IDENTITY);
+      setHydrated(true);
+      return;
+    }
     const saved = readIdentity(token);
     setHydrated(true);
     if (!saved) {
@@ -54,7 +63,7 @@ export function PublicFillWrapper({
       return;
     }
     setIdentity(saved);
-  }, [token, router]);
+  }, [preview, token, router]);
 
   if (!hydrated || !identity) {
     return (
@@ -64,7 +73,7 @@ export function PublicFillWrapper({
     );
   }
 
-  const backHref = `/p/${token}/forms`;
+  const backHref = withPreview(`/p/${token}/forms`, preview);
 
   return (
     <div className="flex min-h-screen flex-col bg-secondary dark:bg-background">
@@ -78,18 +87,21 @@ export function PublicFillWrapper({
             Voltar à lista
           </Link>
           <div className="flex items-center gap-1">
-            <div className="min-w-0 text-left text-xs text-muted-foreground sm:text-right">
-              <div className="truncate font-medium text-foreground">
-                {identity.client_name}
+            {preview ? null : (
+              <div className="min-w-0 text-left text-xs text-muted-foreground sm:text-right">
+                <div className="truncate font-medium text-foreground">
+                  {identity.client_name}
+                </div>
+                <div className="truncate">{identity.client_email}</div>
               </div>
-              <div className="truncate">{identity.client_email}</div>
-            </div>
+            )}
             <ThemeToggle />
           </div>
         </div>
       </div>
 
-      <div className="mx-auto w-full max-w-6xl flex-1 px-3 py-4 sm:px-4 sm:py-8">
+      <div className="mx-auto w-full max-w-6xl flex-1 space-y-4 px-3 py-4 sm:px-4 sm:py-8">
+        {preview ? <PreviewBanner /> : null}
         <PublicFormsFlow
           token={token}
           template={template}
@@ -99,6 +111,7 @@ export function PublicFillWrapper({
           previousByField={previousByField}
           previousByMatrix={previousByMatrix}
           allowResubmit={allowResubmit}
+          preview={preview}
         />
 
         <div className="mt-6 flex justify-start">

@@ -30,6 +30,8 @@ import type {
 
 import { createPublicSubmission } from "../actions";
 import { clearIdentity, readIdentity } from "../identity-storage";
+import { PreviewBanner } from "../preview-banner";
+import { PREVIEW_IDENTITY, withPreview } from "../preview-mode";
 import {
   clearAllDraftsForToken,
   clearDraftProgress,
@@ -52,6 +54,7 @@ interface Props {
   allowResubmit: boolean;
   officeSettings: PublicOfficeSettings | null;
   isProjectOwner?: boolean;
+  preview?: boolean;
 }
 
 export function PublicFormsList({
@@ -67,6 +70,7 @@ export function PublicFormsList({
   allowResubmit,
   officeSettings,
   isProjectOwner = false,
+  preview = false,
 }: Props) {
   const router = useRouter();
   const [identity, setIdentity] = useState<{
@@ -77,6 +81,11 @@ export function PublicFormsList({
   const [isSubmitting, startSubmitting] = useTransition();
 
   useEffect(() => {
+    if (preview) {
+      setIdentity(PREVIEW_IDENTITY);
+      setHydrated(true);
+      return;
+    }
     const saved = readIdentity(token);
     setHydrated(true);
     if (!saved) {
@@ -84,10 +93,10 @@ export function PublicFormsList({
       return;
     }
     setIdentity(saved);
-  }, [token, router]);
+  }, [preview, token, router]);
 
   const completedByTemplate = useMemo(() => {
-    if (!identity) return new Set<string>();
+    if (preview || !identity) return new Set<string>();
     const email = identity.client_email.toLowerCase();
     const set = new Set<string>();
     for (const s of submissions) {
@@ -100,7 +109,7 @@ export function PublicFormsList({
       }
     }
     return set;
-  }, [submissions, identity, answeredAllByTemplate, totalAllByTemplate]);
+  }, [preview, submissions, identity, answeredAllByTemplate, totalAllByTemplate]);
 
   const [progressTick, setProgressTick] = useState(0);
 
@@ -125,6 +134,10 @@ export function PublicFormsList({
     for (const t of templates) {
       const total = requiredCountByTemplate[t.id] ?? 0;
       const serverTotalAll = totalAllByTemplate[t.id] ?? 0;
+      if (preview) {
+        map.set(t.id, { done: 0, total, doneAll: 0, totalAll: serverTotalAll });
+        continue;
+      }
       const serverAnsweredAll = Math.min(
         answeredAllByTemplate[t.id] ?? 0,
         serverTotalAll,
@@ -162,6 +175,7 @@ export function PublicFormsList({
     requiredCountByTemplate,
     totalAllByTemplate,
     answeredAllByTemplate,
+    preview,
     token,
     progressTick,
   ]);
@@ -228,7 +242,7 @@ export function PublicFormsList({
   }
 
   function handleSubmitAll() {
-    if (!identity) return;
+    if (preview || !identity) return;
     if (pendingTemplates.length === 0) {
       toast.success("Todos os formulários já foram enviados.");
       return;
@@ -292,21 +306,29 @@ export function PublicFormsList({
     );
   }
 
+  const showSubmitBar = templates.length > 0 && !preview;
+
   return (
-    <div className="flex min-h-screen flex-col bg-secondary dark:bg-background">
+    <div
+      className={`flex min-h-screen flex-col bg-secondary dark:bg-background ${showSubmitBar ? "pb-36 sm:pb-24" : ""}`}
+    >
       <div className="border-b bg-background">
         <div className="mx-auto flex w-full max-w-6xl items-center justify-between gap-3 px-4 py-4">
-          <BackLink href={`/p/${token}`}>Voltar à capa</BackLink>
+          <BackLink href={withPreview(`/p/${token}`, preview)}>Voltar à capa</BackLink>
           <div className="flex min-w-0 items-center gap-1">
-            <div className="hidden text-right text-xs text-muted-foreground sm:block">
-              <div className="font-medium text-foreground">{identity.client_name}</div>
-              <div className="truncate">{identity.client_email}</div>
-            </div>
+            {preview ? null : (
+              <div className="hidden text-right text-xs text-muted-foreground sm:block">
+                <div className="font-medium text-foreground">{identity.client_name}</div>
+                <div className="truncate">{identity.client_email}</div>
+              </div>
+            )}
             <ThemeToggle />
-            <Button variant="ghost" size="sm" onClick={handleLogout}>
-              <LogOut className="mr-1 h-3.5 w-3.5" />
-              Sair
-            </Button>
+            {preview ? null : (
+              <Button variant="ghost" size="sm" onClick={handleLogout}>
+                <LogOut className="mr-1 h-3.5 w-3.5" />
+                Sair
+              </Button>
+            )}
           </div>
         </div>
       </div>
@@ -321,7 +343,9 @@ export function PublicFormsList({
           </p>
         </div>
 
-        {isProjectOwner ? (
+        {preview ? <PreviewBanner /> : null}
+
+        {isProjectOwner && !preview ? (
           <div className="flex flex-col gap-3 rounded-md border border-dashed bg-muted/30 p-3 text-xs text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
             <p>
               Visualizando como dono do projeto. As contagens de &quot;respondidas&quot;
@@ -377,7 +401,8 @@ export function PublicFormsList({
                       const hasRequired = progress.total > 0;
                       const isComplete =
                         completed || (hasRequired && progress.done >= progress.total);
-                      const hasPrevious = Boolean(hasPreviousByTemplate[t.id]);
+                      const hasPrevious =
+                        !preview && Boolean(hasPreviousByTemplate[t.id]);
                       const safeDone = Math.min(progress.done, progress.total);
                       const safeDoneAll = Math.min(progress.doneAll, progress.totalAll);
                       const remainingAll = progress.totalAll - safeDoneAll;
@@ -401,7 +426,7 @@ export function PublicFormsList({
                       return (
                         <Link
                           key={t.id}
-                          href={`/p/${token}/forms/${t.id}`}
+                          href={withPreview(`/p/${token}/forms/${t.id}`, preview)}
                           className="block"
                         >
                           <Card className="h-full transition-colors hover:border-primary/40">
@@ -513,30 +538,30 @@ export function PublicFormsList({
             })}
           </div>
         )}
-
-        {templates.length > 0 ? (
-          <Card>
-            <CardContent className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <p className="text-sm font-medium">Envio geral</p>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Preencha os formulários e use este botão para enviar tudo de uma vez.
-                </p>
-              </div>
-              <Button
-                onClick={handleSubmitAll}
-                disabled={!canSubmitAll || isSubmitting}
-                className="sm:self-center"
-              >
-                <Send className="mr-2 h-4 w-4" />
-                {isSubmitting ? "Enviando..." : "Enviar todos os formulários"}
-              </Button>
-            </CardContent>
-          </Card>
-        ) : null}
       </div>
 
       <PublicFooter officeSettings={officeSettings} />
+
+      {showSubmitBar ? (
+        <div className="fixed inset-x-0 bottom-0 z-40 border-t bg-card/95 shadow-[0_-8px_24px_-12px_rgba(0,0,0,0.35)] backdrop-blur supports-[backdrop-filter]:bg-card/80">
+          <div className="mx-auto flex w-full max-w-6xl flex-col gap-3 px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0">
+              <p className="text-sm font-medium">Envio geral</p>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                Preencha os formulários e use este botão para enviar tudo de uma vez.
+              </p>
+            </div>
+            <Button
+              onClick={handleSubmitAll}
+              disabled={!canSubmitAll || isSubmitting}
+              className="w-full shrink-0 sm:w-auto"
+            >
+              <Send className="mr-2 h-4 w-4" />
+              {isSubmitting ? "Enviando..." : "Enviar todos os formulários"}
+            </Button>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

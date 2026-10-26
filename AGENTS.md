@@ -215,4 +215,60 @@ evita cruzar os dois tipos de alvo:
 
 `handleDragEnd` ramifica do mesmo jeito: se o `active.id` é seção, reordena
 `sections`; senão, reordena os campos da seção do campo ativo. Não volte a
-aninhaar um `DndContext` por seção — isso quebrava o drag de seções.
+aninhar um `DndContext` por seção — isso quebrava o drag de seções.
+
+## Texto rico em `label` e `help_text`
+
+Labels e textos de ajuda dos campos aceitam HTML curto. A sanitização
+centralizada fica em `src/lib/rich-text.ts`:
+
+```ts
+sanitizeFieldHtml(html)  // tags: p, br, strong, em, ul, ol, li, a
+plainTextFromHtml(html)  // para progresso, PDF fallback e comparações
+fieldPlainLabel(label)   // texto plano do label (busca, toasts, etc.)
+parseRichText(html)      // árvore para o PDF
+```
+
+- **Editor:** `InlineHtmlEditor` (TipTap) no builder. Links só via
+  `normalizeHref` (http/https/mailto, ou domínio sem protocolo → https).
+- **Persistência:** `saveTemplate` sanitiza `label` e `help_text` de novo
+  no servidor — não confie só no cliente.
+- **UI:** `RichText` / `RichTextOr` / `FieldHelpText` em
+  `src/components/rich-text.tsx` (`dangerouslySetInnerHTML` só com HTML já
+  sanitizado).
+- **PDF:** `PdfRichLabel` em `src/app/p/[token]/pdf/pdf-rich-label.tsx`
+  — nunca jogue HTML cru no `@react-pdf/renderer`.
+
+## Modo visualização (`?preview=1`)
+
+`isPreviewMode` / `withPreview` / `PREVIEW_IDENTITY` em
+`src/app/p/[token]/preview-mode.ts`. O botão "Visualizar" do dialog de
+link público abre `/p/{token}?preview=1`.
+
+Nesse modo o fluxo público:
+
+- usa identidade fixa (`Visualização` / `preview@local`);
+- **não** lê nem grava draft no `localStorage`;
+- **não** carrega respostas anteriores;
+- mostra `PreviewBanner` e oculta o bloco "Respondendo como…".
+
+Ao adicionar rotas ou writes no fluxo `/p/[token]`, preserve o query
+`preview=1` com `withPreview` e pule persistência quando `preview` for true.
+
+## Igualar ambientes na matriz (`EnvLinks`)
+
+O cliente pode marcar uma coluna para acompanhar outra. Helpers em
+`src/lib/forms/utils.ts`:
+
+- `linkEnvironment(links, target, source)` — grava o vínculo; desfaz ciclo
+  se a origem já apontava para o destino.
+- `resolveEnvRoot(env, links)` — segue a cadeia até a origem.
+- `syncLinkedField(...)` — copia o valor da origem para o grupo; destinos
+  bloqueados (`isTargetLocked`) ficam como estão.
+- `linksFromDraft` / `env_links` no draft (`draft-progress.ts`) persistem
+  os vínculos no `localStorage` junto com as respostas.
+
+A UI de "Igualar" e o scroll horizontal da matriz ficam em
+`src/components/forms/matrix-tools.tsx` (`EqualizeColumnSelect`,
+`useHorizontalScrollSync`, `MatrixPanScroll`). Use essas classes/hooks
+em vez de duplicar tabela de matriz.

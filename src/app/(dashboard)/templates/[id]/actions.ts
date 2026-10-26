@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 
 import { createClient } from "@/lib/supabase/server";
+import { sanitizeFieldHtml } from "@/lib/rich-text";
 import type {
   ClFormField,
   ClFormSection,
@@ -156,6 +157,8 @@ export async function saveTemplate(templateId: string, payload: TemplateSavePayl
 
   const fieldsWithSections = payload.fields.map((f) => ({
     ...f,
+    label: sanitizeFieldHtml(f.label),
+    help_text: sanitizeFieldHtml(f.help_text) || null,
     section_id: f.section_local_id
       ? (localToRealSection.get(f.section_local_id) ?? null)
       : null,
