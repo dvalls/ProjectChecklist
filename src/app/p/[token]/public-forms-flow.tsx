@@ -15,6 +15,7 @@ import {
 import { TableFieldControl } from "@/components/forms/table-field";
 import { ImageDisplayField } from "@/components/form-builder/field-preview";
 import { PhotoHintButton } from "@/components/form-builder/photo-hint-button";
+import { ChoiceLabel, RecommendedBadge } from "@/components/form-builder/shared";
 import { FieldHelpText, RichTextOr } from "@/components/rich-text";
 import {
   EqualizeColumnSelect,
@@ -1125,7 +1126,7 @@ function FieldInput({
             <SelectContent>
               {choices.map((c) => (
                 <SelectItem key={c.value} value={c.value}>
-                  {c.label}
+                  <ChoiceLabel label={c.label} recommended={c.recommended} />
                 </SelectItem>
               ))}
             </SelectContent>
@@ -1286,8 +1287,15 @@ function FieldInput({
             </div>
             {!compact ? fieldPhotoButton : null}
             {previousBadge}
+            {opts.recommended_value ? <RecommendedBadge /> : null}
           </div>
           {!compact ? <FieldHelpText html={field.help_text} className="pl-6" /> : null}
+          {opts.recommended_value && !compact ? (
+            <p className="pl-6 text-[11px] text-warning-foreground">
+              StudioBIM recomenda:{" "}
+              <strong>{opts.recommended_value === "true" ? "Sim" : "Não"}</strong>
+            </p>
+          ) : null}
         </div>
       ) : null}
 
@@ -1315,7 +1323,7 @@ function FieldInput({
                 />
                 <span className="min-w-0 flex-1 break-words">
                   <span className="inline-flex flex-wrap items-center gap-1.5">
-                    <span>{c.label}</span>
+                    <ChoiceLabel label={c.label} recommended={c.recommended} />
                     {c.image_url ? (
                       <PhotoHintButton
                         imagePath={c.image_url}
@@ -1372,7 +1380,7 @@ function FieldInput({
             <SelectContent>
               {choices.map((c) => (
                 <SelectItem key={c.value} value={c.value}>
-                  {c.label}
+                  <ChoiceLabel label={c.label} recommended={c.recommended} />
                 </SelectItem>
               ))}
             </SelectContent>
@@ -1437,8 +1445,8 @@ function FieldInput({
                       className="mt-0.5 shrink-0 cursor-pointer"
                     />
                     <div className="min-w-0">
-                      <div className="flex items-center gap-1">
-                        <span className="min-w-0 break-words">{c.label}</span>
+                      <div className="flex flex-wrap items-center gap-1">
+                        <ChoiceLabel label={c.label} recommended={c.recommended} />
                         {c.image_url ? (
                           <PhotoHintButton
                             imagePath={c.image_url}

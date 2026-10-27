@@ -366,3 +366,18 @@ data (`dd/mm hh:mm`). `PreviousFieldValue` carrega `client_name`,
 `cache: "no-store"` no `fetch` global. No Next.js 14 o fetch da rota é
 cacheado; sem isso, a leitura das respostas anteriores no preenchimento
 público devolve resultado antigo ou vazio. Não remova esse override.
+
+## Opções recomendadas (StudioBIM)
+
+Escolhas de `select` / `radio` / `checkbox_group` podem ter
+`choice.recommended`. Checkbox simples usa `options.recommended_value`
+(`"true"` | `"false"`). A UI compartilhada fica em
+`src/components/form-builder/shared.tsx`:
+
+- `ChoiceLabel` — texto da opção + badge (ou estrela se `showBadge={false}`)
+- `RecommendedBadge` — selo "Recomendado"
+
+Use esses componentes no builder, no preview **e no preenchimento público**
+(`public-forms-flow.tsx`). Não renderize `c.label` cru quando a opção
+puder ser recomendada. No checkbox, o texto auxiliar é
+"StudioBIM recomenda: Sim/Não".
