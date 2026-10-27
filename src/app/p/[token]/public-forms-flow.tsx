@@ -48,7 +48,6 @@ import type {
 } from "@/lib/supabase/types";
 
 import type { CheckboxGroupValue, FieldValue } from "@/lib/forms/types";
-import { isTableAnswered } from "@/lib/forms/table";
 import { fieldPlainLabel, plainTextFromHtml } from "@/lib/rich-text";
 import {
   evaluateVisible,
@@ -272,7 +271,7 @@ function PublicSubmissionForm({
     let done = 0;
     for (const env of envScope) {
       for (const f of fields) {
-        if (isDisplayOnly(f.type)) continue;
+        if (isDisplayOnly(f.type) || f.type === "table") continue;
         if (!f.required) continue;
         total += 1;
         const key = makeFieldKey(f.id, env);
@@ -340,7 +339,7 @@ function PublicSubmissionForm({
         const v = values[key];
         const visible = evaluateVisible(f.visible_when, values, env);
 
-        if (f.required && visible) {
+        if (f.required && f.type !== "table" && visible) {
           const missing =
             f.type === "checkbox"
               ? v?.value !== "true"
@@ -349,9 +348,7 @@ function PublicSubmissionForm({
                     const parsed = parseCheckboxGroup(v?.value ?? null);
                     return parsed.selected.length === 0 && !parsed.other;
                   })()
-                : f.type === "table"
-                  ? !isTableAnswered(f, v?.value ?? null) && !v?.value
-                  : !v?.value;
+                : !v?.value;
           if (missing) {
             continue;
           }
@@ -1006,11 +1003,7 @@ function FieldInput({
           <div className="flex flex-wrap items-start gap-2">
             <div className="flex min-w-0 items-start gap-1 text-sm font-medium leading-snug">
               <RichTextOr html={field.label} />
-              {field.required ? (
-                <span className="text-destructive-foreground">*</span>
-              ) : null}
             </div>
-            {fieldPhotoButton}
             {previousBadge}
           </div>
         ) : previousBadge ? (

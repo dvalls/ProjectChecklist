@@ -94,18 +94,7 @@ export function FieldInputControl({
           <div className="flex flex-wrap items-center gap-2">
             <div className="flex min-w-0 items-start gap-1 text-sm font-medium leading-snug">
               <RichTextOr html={field.label} />
-              {field.required ? (
-                <span className="text-destructive-foreground">*</span>
-              ) : null}
             </div>
-            {opts.image_url ? (
-              <PhotoHintButton
-                imagePath={opts.image_url}
-                caption={opts.image_caption ?? null}
-                alt={fieldPlainLabel(field.label, "Foto de apoio")}
-                size="sm"
-              />
-            ) : null}
           </div>
         ) : null}
         {showTableLabel ? <FieldHelpText html={field.help_text} /> : null}

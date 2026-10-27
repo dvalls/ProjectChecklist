@@ -159,7 +159,7 @@ export function ProjectCardMenu({
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem
-            className="text-destructive focus:bg-destructive focus:text-destructive-foreground"
+            className="text-destructive-foreground focus:bg-destructive focus:text-destructive-foreground"
             onClick={(e) => {
               e.preventDefault();
               setDeleteOpen(true);

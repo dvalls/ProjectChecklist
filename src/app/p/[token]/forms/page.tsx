@@ -106,7 +106,11 @@ export default async function PublicFormsListPage({
     const fillableIds = fillableFieldsByTemplate.get(t.id) ?? new Set<string>();
     const requiredBase = typedAllFields.filter(
       (f) =>
-        f.template_id === t.id && f.required && f.type !== "info" && f.type !== "image",
+        f.template_id === t.id &&
+        f.required &&
+        f.type !== "info" &&
+        f.type !== "image" &&
+        f.type !== "table",
     ).length;
     const envCount =
       t.layout_mode === "matrix" ? Math.max(1, (t.environments ?? []).length) : 1;

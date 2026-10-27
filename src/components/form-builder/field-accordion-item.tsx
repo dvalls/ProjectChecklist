@@ -1,7 +1,11 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { useSortable } from "@dnd-kit/sortable";
+import {
+  defaultAnimateLayoutChanges,
+  useSortable,
+  type AnimateLayoutChanges,
+} from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import {
   Asterisk,
@@ -64,6 +68,9 @@ import {
   TypePicker,
 } from "./shared";
 
+const animateLayoutChanges: AnimateLayoutChanges = (args) =>
+  defaultAnimateLayoutChanges({ ...args, wasDragging: true });
+
 const OP_LABELS: Record<ConditionOp, string> = {
   truthy: "estiver marcado/preenchido",
   eq: "for igual a",
@@ -77,6 +84,7 @@ interface Props {
   expanded: boolean;
   templateId: string;
   autoFocusLabel?: boolean;
+  highlighted?: boolean;
   onToggle: () => void;
   onChange: (updater: (f: EditorField) => EditorField) => void;
   onDelete: () => void;
@@ -91,6 +99,7 @@ export function FieldAccordionItem({
   expanded,
   templateId,
   autoFocusLabel,
+  highlighted,
   onToggle,
   onChange,
   onDelete,
@@ -98,7 +107,7 @@ export function FieldAccordionItem({
   onMoveToSection,
 }: Props) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
-    useSortable({ id: field.localId });
+    useSortable({ id: field.localId, animateLayoutChanges });
 
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const labelText = fieldPlainLabel(field.label);
@@ -149,6 +158,7 @@ export function FieldAccordionItem({
       className={cn(
         "overflow-hidden rounded-md border bg-background transition-colors",
         expanded ? "border-foreground shadow-sm" : "border-border hover:bg-muted/40",
+        highlighted && "border-primary bg-primary/5 ring-2 ring-primary/30",
       )}
     >
       <div
@@ -164,7 +174,7 @@ export function FieldAccordionItem({
             onToggle();
           }
         }}
-        className="group flex cursor-pointer items-center gap-2 px-2 py-1.5"
+        className="group flex cursor-pointer scroll-mt-32 items-center gap-2 px-2 py-1.5"
       >
         <button
           type="button"
@@ -288,7 +298,8 @@ export function FieldAccordionItem({
                     nextType === "radio" ||
                     nextType === "checkbox_group";
                   const prevOpts = (f.options as Exclude<FieldOptions, null>) ?? {};
-                  const supportPhotoHint = nextType !== "info" && nextType !== "image";
+                  const supportPhotoHint =
+                    nextType !== "info" && nextType !== "image" && nextType !== "table";
                   const photoHint = supportPhotoHint
                     ? {
                         image_url: prevOpts.image_url ?? null,
@@ -299,7 +310,9 @@ export function FieldAccordionItem({
                     ...f,
                     type: nextType,
                     required:
-                      nextType === "info" || nextType === "image" ? false : f.required,
+                      nextType === "info" || nextType === "image" || nextType === "table"
+                        ? false
+                        : f.required,
                     options: keepChoices
                       ? {
                           choices: prevOpts.choices ?? [],
@@ -318,7 +331,7 @@ export function FieldAccordionItem({
                               image_link: prevOpts.image_link ?? null,
                             }
                           : nextType === "table"
-                            ? { ...createDefaultTable(), ...(photoHint ?? {}) }
+                            ? createDefaultTable()
                             : photoHint,
                   };
                 })
@@ -551,7 +564,7 @@ export function FieldAccordionItem({
             />
           ) : null}
 
-          {!isDisplayOnly ? (
+          {!isDisplayOnly && field.type !== "table" ? (
             <FieldPhotoHint
               templateId={templateId}
               fieldLocalId={field.localId}
@@ -626,7 +639,7 @@ export function FieldAccordionItem({
             </div>
           ) : null}
 
-          {!isDisplayOnly ? (
+          {!isDisplayOnly && field.type !== "table" ? (
             <label className="flex cursor-pointer items-center gap-2 rounded-md border bg-background px-3 py-2">
               <Checkbox
                 checked={field.required}

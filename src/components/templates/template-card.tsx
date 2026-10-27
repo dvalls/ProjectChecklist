@@ -203,7 +203,7 @@ export function TemplateCard({
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem
-                className="text-destructive focus:bg-destructive focus:text-destructive-foreground"
+                className="text-destructive-foreground focus:bg-destructive focus:text-destructive-foreground"
                 onClick={() => setDeleteOpen(true)}
               >
                 <Trash2 className="mr-2 h-4 w-4" />

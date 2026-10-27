@@ -1,6 +1,13 @@
 "use client";
 
-import { useMemo, useRef, useState, useTransition, type ReactNode } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useTransition,
+  type ReactNode,
+} from "react";
 import { useRouter } from "next/navigation";
 import {
   Group as PanelGroup,
@@ -10,12 +17,18 @@ import {
 import {
   DndContext,
   KeyboardSensor,
+  MeasuringStrategy,
   PointerSensor,
   closestCenter,
+  pointerWithin,
+  rectIntersection,
+  useDroppable,
   useSensor,
   useSensors,
   type CollisionDetection,
   type DragEndEvent,
+  type DragOverEvent,
+  type DragStartEvent,
 } from "@dnd-kit/core";
 import {
   SortableContext,
@@ -38,6 +51,8 @@ import {
   Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
+
+import { relocateInGroup, reorderInGroup } from "@/lib/forms/reorder-groups";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -112,6 +127,8 @@ export interface EditorSection {
   columns: SectionColumns;
 }
 
+type EditorFocus = { kind: "section" | "field"; id: string };
+
 export interface EditorField {
   localId: string;
   id?: string;
@@ -128,6 +145,21 @@ export interface EditorField {
 
 function newLocalId(prefix = "new") {
   return `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
+const SECTION_DROP_PREFIX = "section-drop:";
+
+const fieldOrder = {
+  idOf: (field: EditorField) => field.localId,
+  groupOf: (field: EditorField) => field.section_local_id,
+  setGroup: (field: EditorField, groupId: string | null) => ({
+    ...field,
+    section_local_id: groupId,
+  }),
+};
+
+function sectionIdFromDrop(id: string): string | null {
+  return id.startsWith(SECTION_DROP_PREFIX) ? id.slice(SECTION_DROP_PREFIX.length) : null;
 }
 
 function sectionsFromInitial(sections: ClFormSection[]): EditorSection[] {
@@ -174,9 +206,11 @@ function fieldsFromInitial(
 
 function SortableSectionShell({
   id,
+  highlighted,
   children,
 }: {
   id: string;
+  highlighted?: boolean;
   children: (dragHandle: ReactNode) => ReactNode;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
@@ -204,13 +238,22 @@ function SortableSectionShell({
 
   return (
     <div
+      id={`section-${id}`}
       ref={setNodeRef}
       style={style}
-      className="overflow-hidden rounded-lg border bg-background"
+      className={cn(
+        "scroll-mt-32 overflow-hidden rounded-lg border bg-background transition-colors",
+        highlighted && "border-primary ring-2 ring-primary/40",
+      )}
     >
       {children(dragHandle)}
     </div>
   );
+}
+
+function SectionDropZone({ id, children }: { id: string; children: ReactNode }) {
+  const { setNodeRef } = useDroppable({ id: `${SECTION_DROP_PREFIX}${id}` });
+  return <div ref={setNodeRef}>{children}</div>;
 }
 
 function defaultOptionsFor(type: FieldType): FieldOptions {
@@ -262,6 +305,9 @@ export function TemplateBuilder({
 
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set());
   const [expandedFieldLocalId, setExpandedFieldLocalId] = useState<string | null>(null);
+  const [editorFocus, setEditorFocus] = useState<EditorFocus | null>(null);
+  const [editorFocusSerial, setEditorFocusSerial] = useState(0);
+  const editorFocusRef = useRef<EditorFocus | null>(null);
   const [justCreatedLocalId, setJustCreatedLocalId] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [renameOpen, setRenameOpen] = useState(false);
@@ -284,8 +330,22 @@ export function TemplateBuilder({
 
   const sectionsRef = useRef(sections);
   const fieldsRef = useRef(fields);
+  const fieldsSnapshot = useRef<EditorField[] | null>(null);
+  const lastOverId = useRef<string | null>(null);
+  const recentlyMovedToNewContainer = useRef(false);
   sectionsRef.current = sections;
   fieldsRef.current = fields;
+
+  useEffect(() => {
+    requestAnimationFrame(() => {
+      recentlyMovedToNewContainer.current = false;
+    });
+  }, [fields]);
+
+  function commitFields(next: EditorField[]) {
+    fieldsRef.current = next;
+    setFields(next);
+  }
 
   const collisionDetection: CollisionDetection = (args) => {
     const activeId = String(args.active.id);
@@ -309,25 +369,95 @@ export function TemplateBuilder({
       return collisions;
     }
 
-    const activeField = fieldsRef.current.find((f) => f.localId === activeId);
-    const siblingIds = new Set(
-      fieldsRef.current
-        .filter((f) => f.section_local_id === activeField?.section_local_id)
-        .map((f) => f.localId),
-    );
-
-    return closestCenter({
-      ...args,
-      droppableContainers: args.droppableContainers.filter((container) =>
-        siblingIds.has(String(container.id)),
-      ),
+    const fieldIds = new Set(fieldsRef.current.map((field) => field.localId));
+    const candidates = args.droppableContainers.filter((container) => {
+      const id = String(container.id);
+      return fieldIds.has(id) || id.startsWith(SECTION_DROP_PREFIX);
     });
+    const narrowed = { ...args, droppableContainers: candidates };
+    const pointerHits = pointerWithin(narrowed);
+    const hits = pointerHits.length > 0 ? pointerHits : rectIntersection(narrowed);
+    const fieldHit = hits.find((hit) => fieldIds.has(String(hit.id)));
+    if (fieldHit) {
+      lastOverId.current = String(fieldHit.id);
+      return [fieldHit];
+    }
+
+    const dropHit = hits.find((hit) => String(hit.id).startsWith(SECTION_DROP_PREFIX));
+    if (dropHit) {
+      const sectionId = sectionIdFromDrop(String(dropHit.id));
+      const sectionFields = fieldsRef.current.filter(
+        (field) => field.section_local_id === sectionId,
+      );
+      if (sectionId && sectionFields.length > 0) {
+        const closest = closestCenter({
+          ...narrowed,
+          droppableContainers: candidates.filter((container) =>
+            sectionFields.some((field) => field.localId === String(container.id)),
+          ),
+        });
+        if (closest[0]) {
+          lastOverId.current = String(closest[0].id);
+          return closest;
+        }
+      }
+      lastOverId.current = String(dropHit.id);
+      return [dropHit];
+    }
+
+    if (recentlyMovedToNewContainer.current) lastOverId.current = activeId;
+    return lastOverId.current ? [{ id: lastOverId.current }] : closestCenter(narrowed);
   };
 
   function toggleField(localId: string) {
     setExpandedFieldLocalId((prev) => (prev === localId ? null : localId));
     setJustCreatedLocalId(null);
   }
+
+  function revealInEditor(next: EditorFocus) {
+    if (next.kind === "field") {
+      const field = fieldsRef.current.find((item) => item.localId === next.id);
+      if (!field) return;
+      const sectionId = field.section_local_id;
+      if (sectionId) {
+        setCollapsedSections((prev) => {
+          if (!prev.has(sectionId)) return prev;
+          const copy = new Set(prev);
+          copy.delete(sectionId);
+          return copy;
+        });
+      }
+      setExpandedFieldLocalId(next.id);
+    } else {
+      setCollapsedSections((prev) => {
+        if (!prev.has(next.id)) return prev;
+        const copy = new Set(prev);
+        copy.delete(next.id);
+        return copy;
+      });
+    }
+    editorFocusRef.current = next;
+    setEditorFocus(next);
+    setEditorFocusSerial((n) => n + 1);
+  }
+
+  useEffect(() => {
+    const focus = editorFocusRef.current;
+    if (!focus) return;
+    const elementId =
+      focus.kind === "field" ? `field-head-${focus.id}` : `section-${focus.id}`;
+    const frame = requestAnimationFrame(() => {
+      document.getElementById(elementId)?.scrollIntoView({
+        behavior: "smooth",
+        block: "center",
+      });
+    });
+    const timer = window.setTimeout(() => setEditorFocus(null), 1800);
+    return () => {
+      cancelAnimationFrame(frame);
+      window.clearTimeout(timer);
+    };
+  }, [editorFocusSerial]);
 
   function toggleSection(localId: string) {
     setCollapsedSections((prev) => {
@@ -431,36 +561,126 @@ export function TemplateBuilder({
     );
   }
 
-  function handleDragEnd(event: DragEndEvent) {
+  function targetSectionId(overId: string): string | null {
+    const overField = fieldsRef.current.find((field) => field.localId === overId);
+    if (overField?.section_local_id) return overField.section_local_id;
+    return sectionIdFromDrop(overId);
+  }
+
+  function handleDragStart(event: DragStartEvent) {
+    const activeId = String(event.active.id);
+    fieldsSnapshot.current = fieldsRef.current.some((field) => field.localId === activeId)
+      ? fieldsRef.current
+      : null;
+    lastOverId.current = null;
+  }
+
+  function handleDragOver(event: DragOverEvent) {
     const { active, over } = event;
     if (!over || active.id === over.id) return;
 
     const activeId = String(active.id);
+    if (sectionsRef.current.some((section) => section.local_id === activeId)) return;
+
+    const activeField = fieldsRef.current.find((field) => field.localId === activeId);
+    if (!activeField) return;
+
     const overId = String(over.id);
-    const sectionIds = new Set(sections.map((s) => s.local_id));
+    const targetSection = targetSectionId(overId);
+    if (!targetSection || targetSection === activeField.section_local_id) return;
+
+    const overField = fieldsRef.current.find((field) => field.localId === overId);
+    const translated = active.rect.current.translated;
+    const placeAfter = Boolean(
+      overField && translated && translated.top > over.rect.top + over.rect.height,
+    );
+    const next = relocateInGroup(
+      fieldsRef.current,
+      activeId,
+      targetSection,
+      overField?.localId ?? null,
+      placeAfter,
+      fieldOrder.idOf,
+      fieldOrder.groupOf,
+      fieldOrder.setGroup,
+    );
+    if (next === fieldsRef.current) return;
+
+    recentlyMovedToNewContainer.current = true;
+    commitFields(next);
+    setCollapsedSections((prev) => {
+      if (!prev.has(targetSection)) return prev;
+      const expanded = new Set(prev);
+      expanded.delete(targetSection);
+      return expanded;
+    });
+  }
+
+  function handleDragCancel() {
+    if (fieldsSnapshot.current) commitFields(fieldsSnapshot.current);
+    fieldsSnapshot.current = null;
+    lastOverId.current = null;
+  }
+
+  function handleDragEnd(event: DragEndEvent) {
+    const { active, over } = event;
+    fieldsSnapshot.current = null;
+    if (!over || active.id === over.id) return;
+
+    const activeId = String(active.id);
+    const overId = String(over.id);
+    const sectionIds = new Set(sectionsRef.current.map((section) => section.local_id));
 
     if (sectionIds.has(activeId)) {
       setSections((prev) => {
-        const oldIndex = prev.findIndex((s) => s.local_id === activeId);
-        const newIndex = prev.findIndex((s) => s.local_id === overId);
-        if (oldIndex < 0 || newIndex < 0) return prev;
+        const oldIndex = prev.findIndex((section) => section.local_id === activeId);
+        const newIndex = prev.findIndex((section) => section.local_id === overId);
+        if (oldIndex < 0 || newIndex < 0 || oldIndex === newIndex) return prev;
         return arrayMove(prev, oldIndex, newIndex);
       });
       return;
     }
 
-    const sectionLocalId = fields.find((f) => f.localId === activeId)?.section_local_id;
-    if (!sectionLocalId) return;
+    const activeField = fieldsRef.current.find((field) => field.localId === activeId);
+    if (!activeField) return;
 
-    setFields((prev) => {
-      const sectionFields = prev.filter((f) => f.section_local_id === sectionLocalId);
-      const otherFields = prev.filter((f) => f.section_local_id !== sectionLocalId);
-      const oldIndex = sectionFields.findIndex((f) => f.localId === activeId);
-      const newIndex = sectionFields.findIndex((f) => f.localId === overId);
-      if (oldIndex < 0 || newIndex < 0) return prev;
-      const reordered = arrayMove(sectionFields, oldIndex, newIndex);
-      return [...otherFields, ...reordered];
-    });
+    const overField = fieldsRef.current.find((field) => field.localId === overId);
+    const targetSection = targetSectionId(overId);
+    if (targetSection && targetSection !== activeField.section_local_id) {
+      const next = relocateInGroup(
+        fieldsRef.current,
+        activeId,
+        targetSection,
+        overField?.localId ?? null,
+        false,
+        fieldOrder.idOf,
+        fieldOrder.groupOf,
+        fieldOrder.setGroup,
+      );
+      if (next !== fieldsRef.current) commitFields(next);
+      if (targetSection) {
+        setCollapsedSections((prev) => {
+          if (!prev.has(targetSection)) return prev;
+          const expanded = new Set(prev);
+          expanded.delete(targetSection);
+          return expanded;
+        });
+      }
+      return;
+    }
+
+    if (!overField || overField.section_local_id !== activeField.section_local_id) return;
+    if (!activeField.section_local_id) return;
+
+    const next = reorderInGroup(
+      fieldsRef.current,
+      activeField.section_local_id,
+      activeId,
+      overId,
+      fieldOrder.idOf,
+      fieldOrder.groupOf,
+    );
+    if (next !== fieldsRef.current) commitFields(next);
   }
 
   function handleSave() {
@@ -488,10 +708,13 @@ export function TemplateBuilder({
               label: f.label,
               help_text: f.help_text,
               type: f.type,
-              required: f.required,
+              required: f.type === "table" ? false : f.required,
               column_span: f.column_span,
               position: pos,
-              options: f.options,
+              options:
+                f.type === "table" && f.options
+                  ? { ...f.options, image_url: null, image_caption: null }
+                  : f.options,
               visible_when: f.visible_when,
               visible_when_local_id: f.localId,
             };
@@ -574,7 +797,7 @@ export function TemplateBuilder({
         informational += 1;
       } else {
         questions += 1;
-        if (f.required) required += 1;
+        if (f.required && f.type !== "table") required += 1;
       }
     }
     return { questions, informational, required };
@@ -669,7 +892,7 @@ export function TemplateBuilder({
               ) : null}
               <DropdownMenuSeparator />
               <DropdownMenuItem
-                className="text-destructive focus:bg-destructive focus:text-destructive-foreground"
+                className="text-destructive-foreground focus:bg-destructive focus:text-destructive-foreground"
                 onClick={() => setDeleteOpen(true)}
               >
                 <Trash2 className="mr-2 h-4 w-4" />
@@ -726,6 +949,10 @@ export function TemplateBuilder({
             <DndContext
               sensors={sensors}
               collisionDetection={collisionDetection}
+              measuring={{ droppable: { strategy: MeasuringStrategy.Always } }}
+              onDragStart={handleDragStart}
+              onDragOver={handleDragOver}
+              onDragCancel={handleDragCancel}
               onDragEnd={handleDragEnd}
             >
               <SortableContext
@@ -739,9 +966,16 @@ export function TemplateBuilder({
                   const collapsed = collapsedSections.has(section.local_id);
 
                   return (
-                    <SortableSectionShell key={section.local_id} id={section.local_id}>
+                    <SortableSectionShell
+                      key={section.local_id}
+                      id={section.local_id}
+                      highlighted={
+                        editorFocus?.kind === "section" &&
+                        editorFocus.id === section.local_id
+                      }
+                    >
                       {(dragHandle) => (
-                        <>
+                        <SectionDropZone id={section.local_id}>
                           <div className="flex flex-wrap items-center gap-2 border-b bg-muted/30 px-2 py-1.5">
                             {dragHandle}
                             <button
@@ -826,6 +1060,10 @@ export function TemplateBuilder({
                                         allFields={fields}
                                         templateId={template.id}
                                         expanded={expandedFieldLocalId === field.localId}
+                                        highlighted={
+                                          editorFocus?.kind === "field" &&
+                                          editorFocus.id === field.localId
+                                        }
                                         autoFocusLabel={
                                           justCreatedLocalId === field.localId
                                         }
@@ -849,7 +1087,7 @@ export function TemplateBuilder({
                               />
                             </div>
                           ) : null}
-                        </>
+                        </SectionDropZone>
                       )}
                     </SortableSectionShell>
                   );
@@ -911,6 +1149,12 @@ export function TemplateBuilder({
                   layoutMode={layoutMode}
                   environments={environments}
                   compact
+                  onFocusSection={(localId) =>
+                    revealInEditor({ kind: "section", id: localId })
+                  }
+                  onFocusField={(localId) =>
+                    revealInEditor({ kind: "field", id: localId })
+                  }
                 />
               </CardContent>
             </Card>
@@ -1083,18 +1327,29 @@ function buildInitialValues(
   return out;
 }
 
+const PREVIEW_CONTROL_SELECTOR =
+  "input, textarea, select, button, a, [role='combobox'], [role='listbox'], [role='radio'], [role='checkbox'], [role='option'], [role='switch']";
+
+function previewClickFocusesEditor(target: EventTarget | null) {
+  return !(target instanceof Element && target.closest(PREVIEW_CONTROL_SELECTOR));
+}
+
 function PreviewBody({
   templateId,
   previewSections,
   layoutMode,
   environments,
   compact = false,
+  onFocusSection,
+  onFocusField,
 }: {
   templateId: string;
   previewSections: { section: EditorSection; fields: EditorField[] }[];
   layoutMode: LayoutMode;
   environments: string[];
   compact?: boolean;
+  onFocusSection: (localId: string) => void;
+  onFocusField: (localId: string) => void;
 }) {
   const [values, setValues] = useState<Record<string, FieldValue>>(() =>
     buildInitialValues(previewSections),
@@ -1126,8 +1381,9 @@ function PreviewBody({
       <div className="flex items-center justify-between gap-2">
         <p className="text-[11px] text-muted-foreground">
           {isMatrix
-            ? `Matriz: ${environments.join(" • ")}`
-            : "Preencha os campos para testar exibições condicionais"}
+            ? `Matriz: ${environments.join(" • ")}. `
+            : "Preencha os campos para testar exibições condicionais. "}
+          Clique numa seção ou num campo para localizá-lo no editor.
         </p>
         <button
           type="button"
@@ -1140,7 +1396,11 @@ function PreviewBody({
 
       {previewSections.map(({ section, fields: sf }) => (
         <div key={section.local_id} className="space-y-3">
-          <div className="border-b pb-1">
+          <div
+            className="cursor-pointer border-b pb-1"
+            title="Mostrar seção no editor"
+            onClick={() => onFocusSection(section.local_id)}
+          >
             <div className="inline-block bg-foreground px-2 py-0.5 text-xs font-semibold uppercase tracking-wide text-background">
               {section.title || "(sem título)"}
             </div>
@@ -1164,8 +1424,14 @@ function PreviewBody({
               return (
                 <div
                   key={f.localId}
+                  title="Mostrar campo no editor"
+                  className="cursor-pointer rounded-sm transition-shadow hover:ring-2 hover:ring-primary/30"
                   style={{
                     gridColumn: `span ${Math.min(f.column_span, section.columns)}`,
+                  }}
+                  onClick={(event) => {
+                    if (!previewClickFocusesEditor(event.target)) return;
+                    onFocusField(f.localId);
                   }}
                 >
                   <FieldInputControl

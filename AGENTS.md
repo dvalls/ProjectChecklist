@@ -215,8 +215,9 @@ Não altere a ordenação da query sem ajustar essa lógica.
 
 Há dois downloads (`DownloadReportActions` / `worksheet` em `ReportDocument`):
 relatório de respostas (omite vazio) e checklist completo com respostas
-(todas as perguntas dos templates públicos). No dashboard o loader é
-`getProjectFullReport`; no link público, `getPublicFullReport`.
+(todas as perguntas dos templates públicos). Os botões ficam na capa do
+link público (`getPublicFullReport`). `getProjectFullReport` permanece
+como action autenticada, mas o dashboard não expõe mais o download.
 
 ## Campo tabela (`type: "table"`)
 
@@ -226,12 +227,12 @@ Helpers em `src/lib/forms/table.ts`. O template guarda a grade em
 linhas/colunas extras — `serializeTableAnswer` devolve `null` se não
 houver nada disso. `resolveTable` aplica o template por cima da resposta.
 
-- Builder: `table-structure-editor.tsx`
+- Builder: `table-structure-editor.tsx` (colunas reordenáveis via DnD).
 - Preenchimento: `table-field.tsx`
 - Leitura: `table-value-view.tsx`
-- Obrigatório: `isTableAnswered` (todas as células livres das linhas do
-  template). `tableHasVisibleText` decide se a tabela entra no PDF de
-  respostas mesmo sem JSON.
+- No fluxo público a tabela **não entra no progresso nem na validação de
+  obrigatório** (`type === "table"` é ignorado como `info`/`image`).
+  `isTableAnswered` e `tableHasVisibleText` servem para PDF/resumo.
 
 A constraint `cl_form_fields_type_check` precisa incluir `'table'`
 (migration `supabase/migrations/20261027152518_table_field_type.sql`).
@@ -257,17 +258,33 @@ A prop é `description`; `projectName` foi removida.
 
 ## Drag-and-drop no builder (`template-builder.tsx`)
 
-Há um único `DndContext` para seções e campos. `collisionDetection` customizado
-evita cruzar os dois tipos de alvo:
+Há um único `DndContext` para seções e campos. `collisionDetection` separa os
+alvos:
 
 - Arrastar **seção**: só considera droppables cujo `id` está em
   `sections.map(s => s.local_id)` (distância do ponteiro ao centro vertical).
-- Arrastar **campo**: só considera irmãos da mesma seção
-  (`section_local_id` igual), via `closestCenter` filtrado.
+- Arrastar **campo**: considera campos de qualquer seção e a zona
+  `section-drop:{local_id}`. Em `onDragOver` o campo muda de
+  `section_local_id` quando o alvo é outra seção; `onDragEnd` reordena dentro
+  da seção atual. Seção recolhida abre ao receber o campo.
 
-`handleDragEnd` ramifica do mesmo jeito: se o `active.id` é seção, reordena
-`sections`; senão, reordena os campos da seção do campo ativo. Não volte a
-aninhar um `DndContext` por seção — isso quebrava o drag de seções.
+Não volte a aninhar um `DndContext` por seção — isso quebrava o drag de seções.
+
+## Ordem dos formulários do projeto (`templates-panel.tsx`)
+
+A lista usa um `DndContext` para disciplinas e formulários, com grip no lugar
+das setas. Arrastar a disciplina reordena só as disciplinas visíveis e preserva
+o slot das que não têm formulário (`reorderDisciplines` /
+`reorderSubsetSlots`). Arrastar um formulário reordena dentro da disciplina ou
+move para outra, inclusive "Sem disciplina" (`syncProjectTemplateGroups`).
+Durante o arraste, um grupo que esvazia continua visível para receber o item
+de volta.
+
+Helpers genéricos em `src/lib/forms/reorder-groups.ts`:
+`relocateInGroup`, `reorderInGroup`, `reorderSubsetSlots`. Reuse-os em
+vez de reordenar arrays no componente. `syncProjectTemplateGroups` exige
+a lista completa dos templates do projeto. `reorderDisciplines` exige a
+lista completa de disciplinas (mesmo as sem formulário).
 
 ## Texto rico em `label` e `help_text`
 

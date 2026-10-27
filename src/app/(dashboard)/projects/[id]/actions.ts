@@ -173,6 +173,103 @@ export async function reorderProjectTemplates(projectId: string, orderedIds: str
   return ok();
 }
 
+export async function syncProjectTemplateGroups(
+  projectId: string,
+  groups: { disciplineId: string | null; templateIds: string[] }[],
+) {
+  const supabase = createClient();
+  const auth = await assertUser(supabase);
+  if (!auth.user) return fail(auth.error);
+
+  const { data: project } = await supabase
+    .from("cl_projects")
+    .select("id")
+    .eq("id", projectId)
+    .maybeSingle();
+  if (!project) return fail("Projeto não encontrado.");
+
+  const { data: existing, error } = await supabase
+    .from("cl_form_templates")
+    .select("id")
+    .eq("project_id", projectId);
+  if (error) return fail(error.message);
+
+  const allowed = new Set((existing ?? []).map((template) => template.id as string));
+  const seen = new Set<string>();
+  const updates: { id: string; discipline_id: string | null; position: number }[] = [];
+
+  for (const group of groups) {
+    for (const [index, id] of group.templateIds.entries()) {
+      if (!allowed.has(id) || seen.has(id)) return fail("Lista de formulários inválida.");
+      seen.add(id);
+      updates.push({ id, discipline_id: group.disciplineId, position: index });
+    }
+  }
+
+  if (seen.size !== allowed.size) return fail("Lista de formulários incompleta.");
+
+  const disciplineIds = [
+    ...new Set(
+      groups.map((group) => group.disciplineId).filter((id): id is string => Boolean(id)),
+    ),
+  ];
+  if (disciplineIds.length > 0) {
+    const { data: disciplines, error: disciplineError } = await supabase
+      .from("cl_disciplines")
+      .select("id")
+      .in("id", disciplineIds);
+    if (disciplineError) return fail(disciplineError.message);
+    if ((disciplines ?? []).length !== disciplineIds.length) {
+      return fail("Disciplina não encontrada.");
+    }
+  }
+
+  const results = await Promise.all(
+    updates.map((update) =>
+      supabase
+        .from("cl_form_templates")
+        .update({ discipline_id: update.discipline_id, position: update.position })
+        .eq("id", update.id)
+        .eq("project_id", projectId),
+    ),
+  );
+  for (const { error: updateError } of results) {
+    if (updateError) return fail(updateError.message);
+  }
+
+  revalidatePath(`/projects/${projectId}`);
+  return ok();
+}
+
+export async function reorderDisciplines(orderedIds: string[]) {
+  const supabase = createClient();
+  const auth = await assertUser(supabase);
+  if (!auth.user) return fail(auth.error);
+
+  const { data: all, error } = await supabase.from("cl_disciplines").select("id");
+  if (error || !all) return fail(error?.message ?? "Erro ao buscar disciplinas.");
+
+  const existing = new Set(all.map((discipline) => discipline.id as string));
+  if (
+    orderedIds.length !== existing.size ||
+    new Set(orderedIds).size !== orderedIds.length ||
+    orderedIds.some((id) => !existing.has(id))
+  ) {
+    return fail("Lista de disciplinas inválida.");
+  }
+
+  const results = await Promise.all(
+    orderedIds.map((id, position) =>
+      supabase.from("cl_disciplines").update({ position }).eq("id", id),
+    ),
+  );
+  for (const { error: updateError } of results) {
+    if (updateError) return fail(updateError.message);
+  }
+
+  return ok();
+}
+
 export async function swapDisciplinePositions(id1: string, id2: string) {
   const supabase = createClient();
   const auth = await assertUser(supabase);
