@@ -9,9 +9,9 @@ import { BUCKETS } from "@/lib/constants";
 import { getPublicBucketBaseUrl } from "@/lib/storage";
 
 import {
-  getPublicFullReport,
   getPublicSessionSummary,
   getPublicSubmissionSummary,
+  type FullReportResult,
   type PublicFullReport,
   type PublicSubmissionSummary,
 } from "../actions";
@@ -41,12 +41,12 @@ async function downloadBlob(blob: Blob, filename: string) {
   setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
-async function renderPdfBlob(data: PublicFullReport): Promise<Blob> {
+async function renderPdfBlob(data: PublicFullReport, worksheet = false): Promise<Blob> {
   const [{ pdf }, { ReportDocument }] = await Promise.all([
     import("@react-pdf/renderer"),
     import("./report-document"),
   ]);
-  return pdf(<ReportDocument data={data} />).toBlob();
+  return pdf(<ReportDocument data={data} worksheet={worksheet} />).toBlob();
 }
 
 function summaryToFullReport(
@@ -218,15 +218,17 @@ export function DownloadSessionPdfButton({
 }
 
 interface FullReportButtonProps {
-  token: string;
   projectName: string;
+  loadReport: () => Promise<FullReportResult>;
+  questions?: boolean;
   variant?: "outline" | "default" | "ghost";
-  size?: "sm" | "default";
+  size?: "sm" | "default" | "lg";
 }
 
 export function DownloadFullReportButton({
-  token,
   projectName,
+  loadReport,
+  questions = false,
   variant = "outline",
   size = "sm",
 }: FullReportButtonProps) {
@@ -236,7 +238,7 @@ export function DownloadFullReportButton({
     if (loading) return;
     setLoading(true);
     try {
-      const res = await getPublicFullReport(token);
+      const res = await loadReport();
       if ("error" in res && res.error) {
         toast.error(res.error);
         return;
@@ -247,12 +249,18 @@ export function DownloadFullReportButton({
       }
 
       if (res.data.templates.length === 0) {
+        toast.info("Nenhum formulário público neste projeto.");
+        return;
+      }
+
+      if (!questions && res.data.templates.every((t) => t.submissions.length === 0)) {
         toast.info("Nenhum preenchimento registrado ainda.");
         return;
       }
 
-      const blob = await renderPdfBlob(res.data);
-      const filename = `relatorio-${slugify(projectName) || "checklist"}.pdf`;
+      const blob = await renderPdfBlob(res.data, questions);
+      const prefix = questions ? "checklist" : "relatorio";
+      const filename = `${prefix}-${slugify(projectName) || "checklist"}.pdf`;
       await downloadBlob(blob, filename);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Erro ao gerar PDF.");
@@ -274,7 +282,35 @@ export function DownloadFullReportButton({
       ) : (
         <Download className="mr-1.5 h-3.5 w-3.5" />
       )}
-      Baixar relatório completo
+      {questions
+        ? "Baixar checklist completo com respostas"
+        : "Baixar relatório respostas"}
     </Button>
+  );
+}
+
+export function DownloadReportActions({
+  projectName,
+  loadReport,
+  size = "sm",
+}: {
+  projectName: string;
+  loadReport: () => Promise<FullReportResult>;
+  size?: "sm" | "default" | "lg";
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <DownloadFullReportButton
+        projectName={projectName}
+        loadReport={loadReport}
+        size={size}
+      />
+      <DownloadFullReportButton
+        projectName={projectName}
+        loadReport={loadReport}
+        questions
+        size={size}
+      />
+    </div>
   );
 }

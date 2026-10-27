@@ -1,5 +1,6 @@
 import type { ClFormField, VisibleWhen } from "@/lib/supabase/types";
 
+import { isTableAnswered } from "./table";
 import type { CheckboxGroupValue, FieldValue } from "./types";
 
 export function isDisplayOnly(type: ClFormField["type"]) {
@@ -241,5 +242,6 @@ export function isFieldAnswered(field: ClFormField, v: FieldValue | undefined): 
     if (radioOther !== null) return Boolean(radioOther.other);
     return Boolean(v?.value);
   }
+  if (field.type === "table") return isTableAnswered(field, v?.value ?? null);
   return Boolean(v?.value && v.value.trim() !== "");
 }

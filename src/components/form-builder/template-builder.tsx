@@ -97,6 +97,7 @@ import {
 } from "@/app/(dashboard)/templates/[id]/actions";
 
 import type { FieldValue } from "@/lib/forms/types";
+import { createDefaultTable } from "@/lib/forms/table";
 import { evaluateVisible, isDisplayOnly, makeFieldKey } from "@/lib/forms/utils";
 
 import { FieldInputControl } from "./field-input";
@@ -224,6 +225,9 @@ function defaultOptionsFor(type: FieldType): FieldOptions {
   }
   if (type === "image") {
     return { image_url: null, image_caption: null, image_link: null };
+  }
+  if (type === "table") {
+    return createDefaultTable();
   }
   return null;
 }
@@ -377,7 +381,7 @@ export function TemplateBuilder({
         help_text: null,
         type,
         required: false,
-        column_span: 1,
+        column_span: type === "table" ? 4 : 1,
         options: defaultOptionsFor(type),
         visible_when: null,
       },

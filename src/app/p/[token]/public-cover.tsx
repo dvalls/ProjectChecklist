@@ -31,10 +31,10 @@ import { formatDateTime, getInitials } from "@/lib/format";
 import { identityIdentificationSchema } from "@/lib/schemas/public-link";
 import type { ClDesigner, ClDiscipline, ClProject } from "@/lib/supabase/types";
 
-import { deletePublicSubmission } from "./actions";
+import { deletePublicSubmission, getPublicFullReport } from "./actions";
 import { clearDraftProgress, clearDraftSubmission } from "./draft-progress";
 import { readIdentity, writeIdentity } from "./identity-storage";
-import { DownloadFullReportButton } from "./pdf/download-buttons";
+import { DownloadReportActions } from "./pdf/download-buttons";
 import { PreviewBanner } from "./preview-banner";
 import { withPreview } from "./preview-mode";
 import { PublicFooter, type PublicOfficeSettings } from "./public-footer";
@@ -273,7 +273,14 @@ export function PublicCover({
 
           {preview ? <PreviewBanner /> : null}
 
-          <div className="mb-8 flex justify-stretch sm:justify-end">
+          <div className="mb-8 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
+            {history.length === 0 ? (
+              <DownloadReportActions
+                projectName={project.name}
+                loadReport={() => getPublicFullReport(token)}
+                size="lg"
+              />
+            ) : null}
             <Button
               size="lg"
               onClick={handleStart}
@@ -301,7 +308,10 @@ export function PublicCover({
                   <Clock className="h-4 w-4" />
                   Histórico de preenchimentos
                 </h2>
-                <DownloadFullReportButton token={token} projectName={project.name} />
+                <DownloadReportActions
+                  projectName={project.name}
+                  loadReport={() => getPublicFullReport(token)}
+                />
               </div>
               <div className="divide-y overflow-hidden rounded-lg border bg-card shadow-sm">
                 {buildSessions(history).map((session) => (

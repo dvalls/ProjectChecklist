@@ -49,9 +49,11 @@ import type {
   SectionColumns,
 } from "@/lib/supabase/types";
 
+import { createDefaultTable } from "@/lib/forms/table";
 import { fieldPlainLabel } from "@/lib/rich-text";
 
 import { InlineHtmlEditor } from "./inline-html-editor";
+import { TableStructureEditor } from "./table-structure-editor";
 import { PhotoHintEditor } from "./photo-hint-editor";
 import type { EditorField, EditorSection } from "./template-builder";
 import {
@@ -315,7 +317,9 @@ export function FieldAccordionItem({
                               image_caption: prevOpts.image_caption ?? null,
                               image_link: prevOpts.image_link ?? null,
                             }
-                          : photoHint,
+                          : nextType === "table"
+                            ? { ...createDefaultTable(), ...(photoHint ?? {}) }
+                            : photoHint,
                   };
                 })
               }
@@ -340,6 +344,22 @@ export function FieldAccordionItem({
               }
             />
           </div>
+
+          {field.type === "table" ? (
+            <TableStructureEditor
+              options={field.options}
+              onChange={(next) =>
+                onChange((f) => ({
+                  ...f,
+                  options: {
+                    ...((f.options as Exclude<FieldOptions, null>) ?? {}),
+                    columns: next.columns,
+                    rows: next.rows,
+                  },
+                }))
+              }
+            />
+          ) : null}
 
           {isInfo ? (
             <div className="space-y-1.5">

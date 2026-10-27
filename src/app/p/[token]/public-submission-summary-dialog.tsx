@@ -3,10 +3,13 @@
 import { useEffect, useRef, useState } from "react";
 import { FileText, Loader2 } from "lucide-react";
 
+import { TableValueView } from "@/components/forms/table-value-view";
 import { Button } from "@/components/ui/button";
 import { RichTextOr } from "@/components/rich-text";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import type { ClFormSection } from "@/lib/supabase/types";
+
+import { tableHasVisibleText } from "@/lib/forms/table";
 
 import { getPublicSessionSummary, type PublicSubmissionSummary } from "./actions";
 import { DownloadSessionPdfButton } from "./pdf/download-buttons";
@@ -135,15 +138,24 @@ function SummaryContent({ summary }: { summary: PublicSubmissionSummary }) {
           },
         ];
 
+  const answerVisible = (
+    field: PublicSubmissionSummary["fields"][number],
+    value: string | null | undefined,
+    imageUrl: string | null | undefined,
+  ) => {
+    if (field.type === "table") return tableHasVisibleText(field, value ?? null);
+    return isFilled(value, imageUrl);
+  };
+
   const fieldHasAnswer = (field: PublicSubmissionSummary["fields"][number]) => {
     if (isMatrix) {
       return environments.some((env) => {
         const v = matrixByKey.get(`${field.id}::${env}`);
-        return isFilled(v?.value, v?.image_url);
+        return answerVisible(field, v?.value, v?.image_url);
       });
     }
     const v = valuesByField.get(field.id);
-    return isFilled(v?.value, v?.image_url);
+    return answerVisible(field, v?.value, v?.image_url);
   };
 
   const renderedSections = sectionsToRender
@@ -173,8 +185,31 @@ function SummaryContent({ summary }: { summary: PublicSubmissionSummary }) {
               if (isMatrix) {
                 const filledEnvs = environments.filter((env) => {
                   const v = matrixByKey.get(`${field.id}::${env}`);
-                  return isFilled(v?.value, v?.image_url);
+                  return answerVisible(field, v?.value, v?.image_url);
                 });
+                if (field.type === "table") {
+                  return (
+                    <div
+                      key={field.id}
+                      className="space-y-2 rounded-md border p-3 text-sm"
+                    >
+                      <div className="font-medium">
+                        <RichTextOr html={field.label} />
+                      </div>
+                      {filledEnvs.map((env) => {
+                        const v = matrixByKey.get(`${field.id}::${env}`);
+                        return (
+                          <div key={env} className="space-y-1">
+                            <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                              {env}
+                            </p>
+                            <TableValueView field={field} raw={v?.value ?? null} />
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                }
                 return (
                   <div key={field.id} className="rounded-md border p-3 text-sm">
                     <div className="font-medium">
@@ -205,6 +240,16 @@ function SummaryContent({ summary }: { summary: PublicSubmissionSummary }) {
               }
 
               const v = valuesByField.get(field.id);
+              if (field.type === "table") {
+                return (
+                  <div key={field.id} className="space-y-2 rounded-md border p-3 text-sm">
+                    <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                      <RichTextOr html={field.label} />
+                    </div>
+                    <TableValueView field={field} raw={v?.value ?? null} />
+                  </div>
+                );
+              }
               return (
                 <div
                   key={field.id}

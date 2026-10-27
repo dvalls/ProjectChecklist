@@ -3,6 +3,8 @@
 import { useRef, useState } from "react";
 import { ArrowLeft, Eye, Loader2, Users } from "lucide-react";
 
+import { TableValueView } from "@/components/forms/table-value-view";
+import { formatTablePlain } from "@/lib/forms/table";
 import { Badge } from "@/components/ui/badge";
 import { RichTextOr } from "@/components/rich-text";
 import { Button } from "@/components/ui/button";
@@ -41,6 +43,7 @@ function formatFieldValue(
   field: Pick<ClFormField, "type" | "options">,
   raw: string | null,
 ): string {
+  if (field.type === "table") return formatTablePlain(field, raw);
   if (raw === null || raw === undefined || raw === "") return "—";
   const opts = (field.options as Exclude<FieldOptions, null>) ?? {};
   const choices = opts.choices ?? [];
@@ -470,6 +473,34 @@ function SubmissionDetailView({ detail }: { detail: SubmissionDetail }) {
               </div>
             ) : null}
             {secFields.map((field) => {
+              if (field.type === "table") {
+                return (
+                  <div key={field.id} className="space-y-2 rounded-md border p-3 text-sm">
+                    <div className="font-medium">
+                      <RichTextOr html={field.label} />
+                    </div>
+                    {isMatrix ? (
+                      environments.map((env) => {
+                        const v = matrixByKey.get(`${field.id}::${env}`);
+                        return (
+                          <div key={env} className="space-y-1">
+                            <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                              {env}
+                            </p>
+                            <TableValueView field={field} raw={v?.value ?? null} />
+                          </div>
+                        );
+                      })
+                    ) : (
+                      <TableValueView
+                        field={field}
+                        raw={valuesByField.get(field.id)?.value ?? null}
+                      />
+                    )}
+                  </div>
+                );
+              }
+
               if (isMatrix) {
                 return (
                   <div key={field.id} className="rounded-md border p-3 text-sm">
@@ -601,6 +632,41 @@ function CompiledView({
           ) : null}
 
           {secFields.map((field) => {
+            if (field.type === "table") {
+              return (
+                <div key={field.id} className="space-y-3 rounded-md border p-3 text-sm">
+                  <div className="font-medium">
+                    <RichTextOr html={field.label} />
+                  </div>
+                  {(isMatrix ? environments : [null]).map((env) => (
+                    <div key={env ?? "_"} className="space-y-1">
+                      {env ? (
+                        <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                          {env}
+                        </p>
+                      ) : null}
+                      {submissions.map((s) => {
+                        const raw = env
+                          ? (s.matrixValues.find(
+                              (m) => m.field_id === field.id && m.env_key === env,
+                            )?.value ?? null)
+                          : (s.values.find((item) => item.field_id === field.id)?.value ??
+                            null);
+                        return (
+                          <div key={s.id} className="space-y-1">
+                            <p className="truncate text-xs text-muted-foreground">
+                              {s.client_name ?? s.client_email ?? "—"}
+                            </p>
+                            <TableValueView field={field} raw={raw} />
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ))}
+                </div>
+              );
+            }
+
             if (isMatrix) {
               return (
                 <div key={field.id} className="rounded-md border p-3 text-sm">

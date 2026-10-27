@@ -18,6 +18,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { getTemplateAssetPublicUrl } from "@/lib/storage/template-assets";
 import type { ClFormField, FieldOptions } from "@/lib/supabase/types";
 
+import { TableValueView } from "@/components/forms/table-value-view";
+
 import { PhotoHintButton } from "./photo-hint-button";
 import { ChoiceLabel, RecommendedBadge } from "./shared";
 
@@ -112,6 +114,7 @@ export function FieldPreview({
         </>
       ) : null}
 
+      {field.type === "table" ? <TableValueView field={field} raw={null} /> : null}
       {field.type === "text" ? <Input placeholder="Texto curto" disabled /> : null}
       {field.type === "number" ? <Input type="number" placeholder="0" disabled /> : null}
       {field.type === "textarea" ? (

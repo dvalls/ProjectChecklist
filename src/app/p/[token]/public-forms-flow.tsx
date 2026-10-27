@@ -12,6 +12,7 @@ import {
   writeDraftProgress,
 } from "./draft-progress";
 
+import { TableFieldControl } from "@/components/forms/table-field";
 import { ImageDisplayField } from "@/components/form-builder/field-preview";
 import { PhotoHintButton } from "@/components/form-builder/photo-hint-button";
 import { FieldHelpText, RichTextOr } from "@/components/rich-text";
@@ -47,6 +48,7 @@ import type {
 } from "@/lib/supabase/types";
 
 import type { CheckboxGroupValue, FieldValue } from "@/lib/forms/types";
+import { isTableAnswered } from "@/lib/forms/table";
 import { fieldPlainLabel, plainTextFromHtml } from "@/lib/rich-text";
 import {
   evaluateVisible,
@@ -347,7 +349,9 @@ function PublicSubmissionForm({
                     const parsed = parseCheckboxGroup(v?.value ?? null);
                     return parsed.selected.length === 0 && !parsed.other;
                   })()
-                : !v?.value;
+                : f.type === "table"
+                  ? !isTableAnswered(f, v?.value ?? null) && !v?.value
+                  : !v?.value;
           if (missing) {
             continue;
           }
@@ -994,6 +998,37 @@ function FieldInput({
       size="sm"
     />
   ) : null;
+
+  if (field.type === "table") {
+    return (
+      <div className={containerClassName}>
+        {showLabel ? (
+          <div className="flex flex-wrap items-start gap-2">
+            <div className="flex min-w-0 items-start gap-1 text-sm font-medium leading-snug">
+              <RichTextOr html={field.label} />
+              {field.required ? (
+                <span className="text-destructive-foreground">*</span>
+              ) : null}
+            </div>
+            {fieldPhotoButton}
+            {previousBadge}
+          </div>
+        ) : previousBadge ? (
+          <div className="flex">{previousBadge}</div>
+        ) : null}
+        {showLabel ? <FieldHelpText html={field.help_text} /> : null}
+        <TableFieldControl
+          field={field}
+          value={value?.value ?? null}
+          disabled={locked}
+          onChange={(next) => {
+            if (locked) return;
+            onChange({ value: next });
+          }}
+        />
+      </div>
+    );
+  }
 
   const isInlineType =
     field.type === "text" ||

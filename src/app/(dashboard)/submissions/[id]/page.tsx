@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 
+import { TableValueView } from "@/components/forms/table-value-view";
 import { BackLink } from "@/components/layout/back-link";
 import { EmptyState } from "@/components/layout/empty-state";
 import { RichTextOr } from "@/components/rich-text";
@@ -188,6 +189,40 @@ export default async function SubmissionDetailPage({
                   <div className="space-y-2">
                     {secFields.map((field) => {
                       if (field.type === "info") return null;
+
+                      if (field.type === "table") {
+                        return (
+                          <div
+                            key={field.id}
+                            className="space-y-2 rounded-md border p-3 text-sm"
+                          >
+                            <div className="font-medium">
+                              <RichTextOr html={field.label} />
+                            </div>
+                            {isMatrix ? (
+                              environments.map((env) => {
+                                const v = matrixByKey.get(`${field.id}::${env}`);
+                                return (
+                                  <div key={env} className="space-y-1">
+                                    <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                                      {env}
+                                    </p>
+                                    <TableValueView
+                                      field={field}
+                                      raw={v?.value ?? null}
+                                    />
+                                  </div>
+                                );
+                              })
+                            ) : (
+                              <TableValueView
+                                field={field}
+                                raw={valuesByField.get(field.id)?.value ?? null}
+                              />
+                            )}
+                          </div>
+                        );
+                      }
 
                       if (isMatrix) {
                         return (

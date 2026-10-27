@@ -20,8 +20,9 @@ import {
   ImportExistingTemplateDialog,
   type ImportableTemplate,
 } from "./templates/import-existing-dialog";
-import { TemplatesPanel } from "./templates/templates-panel";
+import { ProjectFullReportButton } from "./project-full-report-button";
 import { ProjectPublicLinkDialog } from "./project-public-link-dialog";
+import { TemplatesPanel } from "./templates/templates-panel";
 
 export const dynamic = "force-dynamic";
 
@@ -112,6 +113,7 @@ export default async function ProjectDetailPage({ params }: { params: { id: stri
           ) : null}
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <ProjectFullReportButton projectId={project.id} projectName={project.name} />
           <ProjectPublicLinkDialog
             projectId={project.id}
             initialLinks={(links ?? []) as ClPublicLink[]}

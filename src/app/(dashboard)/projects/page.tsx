@@ -15,6 +15,7 @@ import type {
   ClDiscipline,
   ClFormSubmission,
   ClFormTemplate,
+  ClPublicLink,
 } from "@/lib/supabase/types";
 
 import { ProjectCardMenu } from "./project-card-menu";
@@ -34,21 +35,41 @@ export default async function ProjectsPage() {
 
   const projectIds = (projects ?? []).map((p) => p.id);
 
-  const [{ data: publicSubmissions }, { data: templates }, { data: disciplines }] =
-    await Promise.all([
-      projectIds.length > 0
-        ? supabase
-            .from("cl_form_submissions")
-            .select("*")
-            .in("project_id", projectIds)
-            .not("public_link_id", "is", null)
-            .order("created_at", { ascending: false })
-        : Promise.resolve({ data: [] as ClFormSubmission[] }),
-      projectIds.length > 0
-        ? supabase.from("cl_form_templates").select("*").in("project_id", projectIds)
-        : Promise.resolve({ data: [] as ClFormTemplate[] }),
-      supabase.from("cl_disciplines").select("*").order("position"),
-    ]);
+  const [
+    { data: publicSubmissions },
+    { data: templates },
+    { data: disciplines },
+    { data: publicLinks },
+  ] = await Promise.all([
+    projectIds.length > 0
+      ? supabase
+          .from("cl_form_submissions")
+          .select("*")
+          .in("project_id", projectIds)
+          .not("public_link_id", "is", null)
+          .order("created_at", { ascending: false })
+      : Promise.resolve({ data: [] as ClFormSubmission[] }),
+    projectIds.length > 0
+      ? supabase.from("cl_form_templates").select("*").in("project_id", projectIds)
+      : Promise.resolve({ data: [] as ClFormTemplate[] }),
+    supabase.from("cl_disciplines").select("*").order("position"),
+    projectIds.length > 0
+      ? supabase
+          .from("cl_public_links")
+          .select("project_id, token, is_active, created_at")
+          .in("project_id", projectIds)
+          .is("template_id", null)
+          .eq("is_active", true)
+          .order("created_at", { ascending: false })
+      : Promise.resolve({ data: [] as Pick<ClPublicLink, "project_id" | "token">[] }),
+  ]);
+
+  const publicTokenByProject = new Map<string, string>();
+  for (const link of publicLinks ?? []) {
+    if (!publicTokenByProject.has(link.project_id)) {
+      publicTokenByProject.set(link.project_id, link.token);
+    }
+  }
 
   const submissionsByProject = new Map<string, ClFormSubmission[]>();
   for (const s of (publicSubmissions ?? []) as ClFormSubmission[]) {
@@ -174,6 +195,7 @@ export default async function ProjectsPage() {
                       projectId={project.id}
                       projectName={project.name}
                       projectDescription={project.description}
+                      publicToken={publicTokenByProject.get(project.id) ?? null}
                     />
                   </div>
                 </div>

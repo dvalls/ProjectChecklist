@@ -1,7 +1,15 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { Copy, MoreHorizontal, Pencil, Settings, Trash2 } from "lucide-react";
+import {
+  Copy,
+  ExternalLink,
+  Eye,
+  MoreHorizontal,
+  Pencil,
+  Settings,
+  Trash2,
+} from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -30,12 +38,14 @@ interface ProjectCardMenuProps {
   projectId: string;
   projectName: string;
   projectDescription?: string | null;
+  publicToken?: string | null;
 }
 
 export function ProjectCardMenu({
   projectId,
   projectName,
   projectDescription,
+  publicToken,
 }: ProjectCardMenuProps) {
   const [renameOpen, setRenameOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -91,6 +101,33 @@ export function ProjectCardMenu({
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" onClick={(e) => e.preventDefault()}>
+          {publicToken ? (
+            <>
+              <DropdownMenuItem
+                title="Abrir link público"
+                onSelect={() => {
+                  window.open(`/p/${publicToken}`, "_blank", "noopener,noreferrer");
+                }}
+              >
+                <ExternalLink className="mr-2 h-4 w-4" />
+                Abrir
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                title="Visualizar o formulário sem gravar respostas"
+                onSelect={() => {
+                  window.open(
+                    `/p/${publicToken}?preview=1`,
+                    "_blank",
+                    "noopener,noreferrer",
+                  );
+                }}
+              >
+                <Eye className="mr-2 h-4 w-4" />
+                Visualizar
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+            </>
+          ) : null}
           <DropdownMenuItem
             onClick={(e) => {
               e.preventDefault();

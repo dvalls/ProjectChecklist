@@ -23,12 +23,25 @@ function pickFontFamily(style: PdfStyle): string {
 }
 
 function resolveFont(baseFont: string, bold: boolean, italic: boolean): string {
+  if (baseFont === "Condensed") return "Condensed";
   const isBold = bold || /Bold/i.test(baseFont);
   const isItalic = italic || /Oblique|Italic/i.test(baseFont);
   if (isBold && isItalic) return "Helvetica-BoldOblique";
   if (isBold) return "Helvetica-Bold";
   if (isItalic) return "Helvetica-Oblique";
   return "Helvetica";
+}
+
+function inlineStyle(
+  baseFont: string,
+  bold: boolean,
+  italic: boolean,
+): { fontFamily: string; fontWeight?: number } {
+  const fontFamily = resolveFont(baseFont, bold, italic);
+  if (baseFont === "Condensed") {
+    return { fontFamily, fontWeight: bold ? 700 : 400 };
+  }
+  return { fontFamily };
 }
 
 function textLook(style: PdfStyle, fontFamily: string) {
@@ -76,7 +89,7 @@ function renderInline(
       bold: marks.bold || node.tag === "strong",
       italic: marks.italic || node.tag === "em",
     };
-    const fontFamily = resolveFont(baseFont, next.bold, next.italic);
+    const face = inlineStyle(baseFont, next.bold, next.italic);
     const children = renderInline(node.children, baseFont, next);
     const key = `${node.tag}-${index}`;
     if (node.tag === "a" && node.href) {
@@ -84,20 +97,23 @@ function renderInline(
         <Link
           key={key}
           src={node.href}
-          style={{ fontFamily, color: "#475569", textDecoration: "underline" }}
+          style={{ ...face, color: "#475569", textDecoration: "underline" }}
         >
           {children}
         </Link>,
       );
       return;
     }
-    const currentFont = resolveFont(baseFont, marks.bold, marks.italic);
-    if (fontFamily === currentFont) {
+    const current = inlineStyle(baseFont, marks.bold, marks.italic);
+    if (
+      face.fontFamily === current.fontFamily &&
+      face.fontWeight === current.fontWeight
+    ) {
       out.push(...children);
       return;
     }
     out.push(
-      <Text key={key} style={{ fontFamily }}>
+      <Text key={key} style={face}>
         {children}
       </Text>,
     );

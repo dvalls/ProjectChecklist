@@ -4,6 +4,7 @@ import { randomBytes } from "node:crypto";
 
 import { revalidatePath } from "next/cache";
 
+import { loadFullReport } from "@/lib/reports/full-report";
 import { assertUser, fail, ok } from "@/lib/server-action";
 import { createClient } from "@/lib/supabase/server";
 
@@ -230,4 +231,12 @@ export async function deleteProjectLink(linkId: string) {
     revalidatePath(`/projects/${typedExisting.project_id}`);
   }
   return ok();
+}
+
+export async function getProjectFullReport(projectId: string) {
+  const supabase = createClient();
+  const auth = await assertUser(supabase);
+  if (!auth.user) return fail(auth.error);
+
+  return loadFullReport(supabase, projectId);
 }

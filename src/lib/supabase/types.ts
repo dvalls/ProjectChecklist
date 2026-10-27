@@ -8,7 +8,8 @@ export type FieldType =
   | "date"
   | "number"
   | "image"
-  | "info";
+  | "info"
+  | "table";
 
 export type ColumnSpan = 1 | 2 | 3 | 4;
 
@@ -27,6 +28,16 @@ export interface Choice {
   image_caption?: string | null;
 }
 
+export interface TableColumnOption {
+  id: string;
+  label: string;
+}
+
+export interface TableRowOption {
+  id: string;
+  cells: Record<string, string>;
+}
+
 export interface FieldOptionsShape {
   choices?: Choice[];
   allow_other?: boolean;
@@ -35,6 +46,8 @@ export interface FieldOptionsShape {
   image_caption?: string | null;
   image_link?: string | null;
   recommended_value?: "true" | "false" | null;
+  columns?: TableColumnOption[];
+  rows?: TableRowOption[];
 }
 
 export type FieldOptions = FieldOptionsShape | null;

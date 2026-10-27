@@ -12,6 +12,7 @@ import {
   List,
   ListChecks,
   Star,
+  Table2,
   Type,
   type LucideIcon,
 } from "lucide-react";
@@ -87,6 +88,12 @@ export const TYPE_META: Record<
     icon: Info,
     description: "Texto explicativo",
   },
+  table: {
+    label: "Tabela",
+    short: "Tabela",
+    icon: Table2,
+    description: "Linhas e colunas, com células livres",
+  },
 };
 
 export const FIELD_TYPE_ORDER: FieldType[] = [
@@ -100,6 +107,7 @@ export const FIELD_TYPE_ORDER: FieldType[] = [
   "radio",
   "image",
   "info",
+  "table",
 ];
 
 export function FieldTypeIcon({
