@@ -8,5 +8,10 @@ export function createServiceRoleClient() {
       persistSession: false,
       autoRefreshToken: false,
     },
+    global: {
+      // Next.js 14 guarda o fetch no cache da rota. Sem isso, a leitura das
+      // respostas anteriores devolve um resultado antigo ou vazio.
+      fetch: (input, init) => fetch(input, { ...init, cache: "no-store" }),
+    },
   });
 }

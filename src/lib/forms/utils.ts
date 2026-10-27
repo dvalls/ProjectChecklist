@@ -245,3 +245,25 @@ export function isFieldAnswered(field: ClFormField, v: FieldValue | undefined): 
   if (field.type === "table") return isTableAnswered(field, v?.value ?? null);
   return Boolean(v?.value && v.value.trim() !== "");
 }
+
+/**
+ * Valor inicial de um campo no preenchimento público.
+ * `draft === undefined` indica que o rascunho não tem o campo.
+ * `previous === undefined` indica que não há resposta anterior.
+ * Um rascunho vazio não esconde uma resposta já enviada.
+ */
+export function resolvePrefillValue(
+  field: ClFormField,
+  draft: string | null | undefined,
+  previous: string | null | undefined,
+  allowResubmit: boolean,
+): string | null {
+  const hasPreviousRecord = previous !== undefined;
+  const draftAnswered = draft !== undefined && isFieldAnswered(field, { value: draft });
+  const draftMayWin = draft !== undefined && (allowResubmit || !hasPreviousRecord);
+
+  if (draftMayWin && draftAnswered) return draft;
+  if (previous !== undefined && previous !== null) return previous;
+  if (draftMayWin) return draft;
+  return field.type === "checkbox" ? "false" : null;
+}

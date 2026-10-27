@@ -219,6 +219,9 @@ export function MatrixPanScroll({
     if (event.button !== 0) return;
     if (event.pointerType === "touch" && !panEnabled) return;
     if (!panEnabled && isInteractiveTarget(event.target)) return;
+    const canScroll =
+      event.currentTarget.scrollWidth - event.currentTarget.clientWidth > 2;
+    if (event.pointerType === "mouse" && canScroll) event.preventDefault();
     drag.current = {
       pointerId: event.pointerId,
       startX: event.clientX,
@@ -241,9 +244,11 @@ export function MatrixPanScroll({
       }
       current.active = true;
       setDragging(true);
+      window.getSelection()?.removeAllRanges();
       event.currentTarget.setPointerCapture(event.pointerId);
     }
     event.preventDefault();
+    window.getSelection()?.removeAllRanges();
     event.currentTarget.scrollLeft = current.scrollLeft - dx;
     onScrollSync(event.currentTarget);
     updateEdges(event.currentTarget);
@@ -274,8 +279,8 @@ export function MatrixPanScroll({
         className={cn(
           "overflow-x-auto overscroll-x-contain",
           (canPan || panEnabled) &&
-            "cursor-grab [&_[role=checkbox]]:cursor-pointer [&_[role=combobox]]:cursor-pointer [&_button]:cursor-pointer [&_input[type=date]]:cursor-text [&_input[type=number]]:cursor-text [&_input[type=radio]]:cursor-pointer [&_input[type=text]]:cursor-text [&_textarea]:cursor-text",
-          panEnabled && "select-none [&_*]:pointer-events-none",
+            "cursor-grab select-none [&_[role=checkbox]]:cursor-pointer [&_[role=combobox]]:cursor-pointer [&_button]:cursor-pointer [&_input[type=date]]:cursor-text [&_input[type=number]]:cursor-text [&_input[type=radio]]:cursor-pointer [&_input[type=text]]:cursor-text [&_input]:select-text [&_textarea]:cursor-text [&_textarea]:select-text",
+          panEnabled && "[&_*]:pointer-events-none",
           dragging && "cursor-grabbing [&_*]:cursor-grabbing",
           className,
         )}

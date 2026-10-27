@@ -18,6 +18,9 @@ export interface PreviousFieldValue {
   value: string | null;
   image_url: string | null;
   submission_id: string;
+  client_name: string | null;
+  client_email: string | null;
+  filled_at: string | null;
 }
 
 export type PreviousValuesMap = Record<string, PreviousFieldValue>;

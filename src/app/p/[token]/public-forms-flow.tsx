@@ -55,6 +55,7 @@ import {
   isDisplayOnly,
   isFieldAnswered,
   linkEnvironment,
+  resolvePrefillValue,
   linksFromDraft,
   makeFieldKey,
   parseCheckboxGroup,
@@ -66,6 +67,7 @@ import {
 } from "@/lib/forms/utils";
 
 import type {
+  PreviousFieldValue,
   PreviousMatrixValuesMap,
   PreviousValuesMap,
 } from "./forms/[templateId]/public-fill-wrapper";
@@ -177,15 +179,14 @@ function PublicSubmissionForm({
           ? savedMatrixValues.get(makeFieldKey(f.id, env))
           : savedValues.get(makeFieldKey(f.id));
         const prev = getPrevious(f.id, env);
-        if (saved !== undefined && (allowResubmit || !prev)) {
-          out[makeFieldKey(f.id, env)] = { value: saved };
-        } else if (prev && prev.value !== null) {
-          out[makeFieldKey(f.id, env)] = { value: prev.value };
-        } else {
-          out[makeFieldKey(f.id, env)] = {
-            value: f.type === "checkbox" ? "false" : null,
-          };
-        }
+        out[makeFieldKey(f.id, env)] = {
+          value: resolvePrefillValue(
+            f,
+            saved,
+            prev ? prev.value : undefined,
+            allowResubmit,
+          ),
+        };
       }
     }
     return out;
@@ -606,6 +607,7 @@ function StandardRenderer({
                       field={field}
                       value={values[key]}
                       hasPrevious={hasPrevious}
+                      previous={previousByField[field.id]}
                       locked={locked}
                       onChange={(patch) => onChange(key, patch)}
                     />
@@ -794,6 +796,7 @@ function MatrixRenderer({
                                     value={values[key]}
                                     compact
                                     hasPrevious={hasPrevious}
+                                    previous={previousByMatrix[field.id]?.[env]}
                                     locked={locked}
                                     radioGroupName={key}
                                     onChange={(patch) => onChange(key, patch)}
@@ -927,11 +930,72 @@ function InfoFieldView({ field }: { field: ClFormField }) {
   );
 }
 
+function firstGivenName(previous: PreviousFieldValue | null | undefined) {
+  const name = previous?.client_name?.trim();
+  if (name) return name.split(/\s+/)[0] || null;
+  const email = previous?.client_email?.trim();
+  if (!email) return null;
+  const local = email.split("@")[0] ?? "";
+  const piece = local.split(/[._-]/).filter(Boolean)[0];
+  if (!piece) return null;
+  return piece.charAt(0).toUpperCase() + piece.slice(1);
+}
+
+const PREVIOUS_FILL_DATE = new Intl.DateTimeFormat("pt-BR", {
+  day: "2-digit",
+  month: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+});
+
+function formatPreviousFillDate(value: string | null | undefined) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return PREVIOUS_FILL_DATE.format(date);
+}
+
+function previousBadgeLabel(
+  previous: PreviousFieldValue | null | undefined,
+  locked: boolean,
+) {
+  const label = [firstGivenName(previous), formatPreviousFillDate(previous?.filled_at)]
+    .filter(Boolean)
+    .join(" · ");
+  if (label) return label;
+  return locked ? "Já respondido" : "Preenchido anteriormente";
+}
+
+function PreviousBadge({
+  locked,
+  previous,
+}: {
+  locked: boolean;
+  previous?: PreviousFieldValue | null;
+}) {
+  const icon = locked ? <Lock className="h-3 w-3" /> : <History className="h-3 w-3" />;
+
+  return (
+    <Badge
+      variant="outline"
+      className={
+        locked
+          ? "border-muted-foreground/30 text-muted-foreground"
+          : "border-warning text-warning-foreground"
+      }
+    >
+      <span className="mr-1 inline-flex">{icon}</span>
+      {previousBadgeLabel(previous, locked)}
+    </Badge>
+  );
+}
+
 function FieldInput({
   field,
   value,
   compact,
   hasPrevious = false,
+  previous = null,
   locked = false,
   radioGroupName,
   onChange,
@@ -940,6 +1004,7 @@ function FieldInput({
   value: FieldValue | undefined;
   compact?: boolean;
   hasPrevious?: boolean;
+  previous?: PreviousFieldValue | null;
   locked?: boolean;
   radioGroupName?: string;
   onChange: (patch: Partial<FieldValue>) => void;
@@ -972,17 +1037,7 @@ function FieldInput({
   }
 
   const previousBadge = hasPrevious ? (
-    <Badge
-      variant="outline"
-      className={
-        locked
-          ? "border-muted-foreground/30 text-muted-foreground"
-          : "border-warning text-warning-foreground"
-      }
-    >
-      {locked ? <Lock className="mr-1 h-3 w-3" /> : <History className="mr-1 h-3 w-3" />}
-      {locked ? "Já respondido" : "Preenchido anteriormente"}
-    </Badge>
+    <PreviousBadge locked={locked} previous={previous} />
   ) : null;
 
   const containerClassName = "space-y-1.5" + (locked ? " opacity-90" : "");

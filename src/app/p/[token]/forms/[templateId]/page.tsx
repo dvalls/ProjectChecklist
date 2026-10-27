@@ -63,7 +63,7 @@ export default async function PublicFormFillPage({
         .order("position"),
       supabase
         .from("cl_form_submissions")
-        .select("id, submitted_at, created_at")
+        .select("id, submitted_at, created_at, client_name, client_email")
         .eq("project_id", typedLink.project_id)
         .eq("template_id", params.templateId)
         .eq("status", "submitted")
@@ -82,6 +82,8 @@ export default async function PublicFormFillPage({
     id: string;
     submitted_at: string | null;
     created_at: string;
+    client_name: string | null;
+    client_email: string | null;
   }[];
 
   const submissionOrder = new Map(
@@ -120,6 +122,15 @@ export default async function PublicFormFillPage({
       return a < b;
     }
 
+    function attributionOf(submissionId: string) {
+      const submission = typedPriorSubmissions.find((item) => item.id === submissionId);
+      return {
+        client_name: submission?.client_name ?? null,
+        client_email: submission?.client_email ?? null,
+        filled_at: submission?.submitted_at ?? submission?.created_at ?? null,
+      };
+    }
+
     for (const v of typedPriorValues) {
       if (v.value === null && !v.image_url) continue;
       const existing = previousByField[v.field_id];
@@ -128,6 +139,7 @@ export default async function PublicFormFillPage({
           value: v.value,
           image_url: v.image_url,
           submission_id: v.submission_id,
+          ...attributionOf(v.submission_id),
         } satisfies PreviousFieldValue;
       }
     }
@@ -141,6 +153,7 @@ export default async function PublicFormFillPage({
           value: v.value,
           image_url: v.image_url,
           submission_id: v.submission_id,
+          ...attributionOf(v.submission_id),
         } satisfies PreviousFieldValue;
       }
       previousByMatrix[v.field_id] = bucket;

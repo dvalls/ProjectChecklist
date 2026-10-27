@@ -8,6 +8,7 @@ import {
   isDisplayOnly,
   isFieldAnswered,
   linkEnvironment,
+  resolvePrefillValue,
   makeFieldKey,
   parseCheckboxGroup,
   resolveEnvRoot,
@@ -232,5 +233,40 @@ describe("isFieldAnswered", () => {
     expect(isFieldAnswered(field("text"), { value: "  " })).toBe(false);
     expect(isFieldAnswered(field("text"), { value: "x" })).toBe(true);
     expect(isFieldAnswered(field("text"), undefined)).toBe(false);
+  });
+});
+
+describe("resolvePrefillValue", () => {
+  function field(type: ClFormField["type"]): ClFormField {
+    return { id: "f1", type } as ClFormField;
+  }
+
+  it("keeps a previous answer when the draft slot is empty", () => {
+    const text = field("text");
+    expect(resolvePrefillValue(text, null, "D+E - #169", true)).toBe("D+E - #169");
+    expect(resolvePrefillValue(text, "", "Novo Hamburgo", true)).toBe("Novo Hamburgo");
+    expect(resolvePrefillValue(text, "   ", "RS", true)).toBe("RS");
+    expect(resolvePrefillValue(field("checkbox"), "false", "true", true)).toBe("true");
+  });
+
+  it("keeps a filled draft edit over the previous answer when resubmit is allowed", () => {
+    expect(resolvePrefillValue(field("text"), "editado", "original", true)).toBe(
+      "editado",
+    );
+  });
+
+  it("ignores the draft when the previous answer is locked", () => {
+    expect(resolvePrefillValue(field("text"), "editado", "original", false)).toBe(
+      "original",
+    );
+    expect(resolvePrefillValue(field("text"), "oi", null, false)).toBe(null);
+  });
+
+  it("uses the draft when there is no previous answer", () => {
+    expect(resolvePrefillValue(field("text"), "oi", undefined, true)).toBe("oi");
+    expect(resolvePrefillValue(field("text"), null, undefined, true)).toBe(null);
+    expect(resolvePrefillValue(field("checkbox"), undefined, undefined, false)).toBe(
+      "false",
+    );
   });
 });

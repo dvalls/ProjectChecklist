@@ -340,4 +340,29 @@ O cliente pode marcar uma coluna para acompanhar outra. Helpers em
 A UI de "Igualar" e o scroll horizontal da matriz ficam em
 `src/components/forms/matrix-tools.tsx` (`EqualizeColumnSelect`,
 `useHorizontalScrollSync`, `MatrixPanScroll`). Use essas classes/hooks
-em vez de duplicar tabela de matriz.
+em vez de duplicar tabela de matriz. `MatrixPanScroll` usa `select-none`
+no container (inputs/textareas voltam a `select-text`) e limpa a seleção
+durante o pan — sem isso o arraste horizontal seleciona texto.
+
+## Prefill público: draft vs resposta anterior
+
+O valor inicial de cada campo passa por `resolvePrefillValue` em
+`src/lib/forms/utils.ts`:
+
+- `draft === undefined` → o rascunho não tem o campo.
+- `previous === undefined` → não há envio anterior.
+- Rascunho vazio (`""`, `"   "`, checkbox `"false"`) **não** esconde uma
+  resposta já enviada.
+- Se `allowResubmit` for false e já existe resposta anterior, o draft é
+  ignorado (campo bloqueado).
+
+O badge de resposta anterior (`PreviousBadge`) mostra primeiro nome +
+data (`dd/mm hh:mm`). `PreviousFieldValue` carrega `client_name`,
+`client_email` e `filled_at` a partir do envio que originou o valor.
+
+## Service-role: sem cache do fetch do Next.js
+
+`createServiceRoleClient()` em `src/lib/supabase/service-role.ts` força
+`cache: "no-store"` no `fetch` global. No Next.js 14 o fetch da rota é
+cacheado; sem isso, a leitura das respostas anteriores no preenchimento
+público devolve resultado antigo ou vazio. Não remova esse override.
