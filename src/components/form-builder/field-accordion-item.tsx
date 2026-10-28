@@ -8,6 +8,7 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import {
+  AlignLeft,
   Asterisk,
   ChevronDown,
   ChevronRight,
@@ -17,6 +18,7 @@ import {
   Image as ImageIcon,
   Loader2,
   Plus,
+  SlidersHorizontal,
   Star,
   Trash2,
   Upload,
@@ -54,7 +56,7 @@ import type {
 } from "@/lib/supabase/types";
 
 import { createDefaultTable } from "@/lib/forms/table";
-import { fieldPlainLabel } from "@/lib/rich-text";
+import { fieldPlainLabel, plainTextFromHtml } from "@/lib/rich-text";
 
 import { InlineHtmlEditor } from "./inline-html-editor";
 import { TableStructureEditor } from "./table-structure-editor";
@@ -87,6 +89,7 @@ interface Props {
   highlighted?: boolean;
   onToggle: () => void;
   onChange: (updater: (f: EditorField) => EditorField) => void;
+  onTextBlur?: () => void;
   onDelete: () => void;
   onDuplicate: () => void;
   onMoveToSection: (sectionLocalId: string) => void;
@@ -102,6 +105,7 @@ export function FieldAccordionItem({
   highlighted,
   onToggle,
   onChange,
+  onTextBlur,
   onDelete,
   onDuplicate,
   onMoveToSection,
@@ -109,7 +113,8 @@ export function FieldAccordionItem({
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
     useSortable({ id: field.localId, animateLayoutChanges });
 
-  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [photoOpen, setPhotoOpen] = useState(false);
+  const [adjustmentsOpen, setAdjustmentsOpen] = useState(false);
   const labelText = fieldPlainLabel(field.label);
 
   const style = {
@@ -147,6 +152,9 @@ export function FieldAccordionItem({
         f.type === "radio"),
   );
   const conditionEnabled = Boolean(field.visible_when);
+  const showPhoto = !isDisplayOnly && field.type !== "table";
+  const showAdjustments = !isDisplayOnly;
+  const hasAdjustments = Boolean(plainTextFromHtml(field.help_text)) || conditionEnabled;
 
   const headerId = `field-head-${field.localId}`;
   const bodyId = `field-body-${field.localId}`;
@@ -288,65 +296,12 @@ export function FieldAccordionItem({
           onClick={(e) => e.stopPropagation()}
         >
           <div className="space-y-1.5">
-            <Label className="text-xs">Tipo de campo</Label>
-            <TypePicker
-              value={field.type}
-              onChange={(nextType) =>
-                onChange((f) => {
-                  const keepChoices =
-                    nextType === "select" ||
-                    nextType === "radio" ||
-                    nextType === "checkbox_group";
-                  const prevOpts = (f.options as Exclude<FieldOptions, null>) ?? {};
-                  const supportPhotoHint =
-                    nextType !== "info" && nextType !== "image" && nextType !== "table";
-                  const photoHint = supportPhotoHint
-                    ? {
-                        image_url: prevOpts.image_url ?? null,
-                        image_caption: prevOpts.image_caption ?? null,
-                      }
-                    : null;
-                  return {
-                    ...f,
-                    type: nextType,
-                    required:
-                      nextType === "info" || nextType === "image" || nextType === "table"
-                        ? false
-                        : f.required,
-                    options: keepChoices
-                      ? {
-                          choices: prevOpts.choices ?? [],
-                          allow_other:
-                            nextType === "checkbox_group" || nextType === "radio"
-                              ? (prevOpts.allow_other ?? false)
-                              : undefined,
-                          ...(photoHint ?? {}),
-                        }
-                      : nextType === "info"
-                        ? { content: prevOpts.content ?? "" }
-                        : nextType === "image"
-                          ? {
-                              image_url: prevOpts.image_url ?? null,
-                              image_caption: prevOpts.image_caption ?? null,
-                              image_link: prevOpts.image_link ?? null,
-                            }
-                          : nextType === "table"
-                            ? createDefaultTable()
-                            : photoHint,
-                  };
-                })
-              }
-            />
-          </div>
-
-          <div className="space-y-1.5">
-            <Label className="text-xs">
-              {isDisplayOnly ? "Título (opcional)" : "Pergunta / Label"}
-            </Label>
+            <Label className="text-xs">{isDisplayOnly ? "Título" : "Pergunta"}</Label>
             <InlineHtmlEditor
               value={field.label}
               tall={field.type === "textarea"}
               autoFocus={expanded && Boolean(autoFocusLabel)}
+              onBlur={onTextBlur}
               onChange={(html) => onChange((f) => ({ ...f, label: html }))}
               placeholder={
                 isInfo
@@ -385,12 +340,9 @@ export function FieldAccordionItem({
                     options: { content: e.target.value },
                   }))
                 }
-                placeholder="Texto informativo (use - para bullets)"
+                placeholder="Texto informativo. Linhas com “- ” viram lista."
                 rows={3}
               />
-              <p className="text-[11px] text-muted-foreground">
-                Linhas começando com &quot;- &quot; viram lista.
-              </p>
             </div>
           ) : null}
 
@@ -564,33 +516,6 @@ export function FieldAccordionItem({
             />
           ) : null}
 
-          {!isDisplayOnly && field.type !== "table" ? (
-            <FieldPhotoHint
-              templateId={templateId}
-              fieldLocalId={field.localId}
-              imageUrl={imageUrl}
-              caption={imageCaption}
-              onChangeImageUrl={(url) =>
-                onChange((f) => ({
-                  ...f,
-                  options: {
-                    ...((f.options as Exclude<FieldOptions, null>) ?? {}),
-                    image_url: url,
-                  },
-                }))
-              }
-              onChangeCaption={(value) =>
-                onChange((f) => ({
-                  ...f,
-                  options: {
-                    ...((f.options as Exclude<FieldOptions, null>) ?? {}),
-                    image_caption: value || null,
-                  },
-                }))
-              }
-            />
-          ) : null}
-
           {field.type === "checkbox" ? (
             <RecommendedValueEditor
               value={opts.recommended_value ?? null}
@@ -606,10 +531,59 @@ export function FieldAccordionItem({
             />
           ) : null}
 
-          {!isInfo ? (
-            <div className="grid gap-3 sm:grid-cols-[auto_1fr]">
-              <div className="space-y-1.5">
-                <Label className="text-xs">Largura</Label>
+          <div className="flex flex-wrap items-center gap-2 border-t pt-3">
+            <TypePicker
+              value={field.type}
+              triggerClassName="h-8 w-auto min-w-[7.5rem] max-w-[13rem] shrink-0 px-2 text-xs"
+              onChange={(nextType) =>
+                onChange((f) => {
+                  const keepChoices =
+                    nextType === "select" ||
+                    nextType === "radio" ||
+                    nextType === "checkbox_group";
+                  const prevOpts = (f.options as Exclude<FieldOptions, null>) ?? {};
+                  const supportPhotoHint =
+                    nextType !== "info" && nextType !== "image" && nextType !== "table";
+                  const photoHint = supportPhotoHint
+                    ? {
+                        image_url: prevOpts.image_url ?? null,
+                        image_caption: prevOpts.image_caption ?? null,
+                      }
+                    : null;
+                  return {
+                    ...f,
+                    type: nextType,
+                    required:
+                      nextType === "info" || nextType === "image" || nextType === "table"
+                        ? false
+                        : f.required,
+                    options: keepChoices
+                      ? {
+                          choices: prevOpts.choices ?? [],
+                          allow_other:
+                            nextType === "checkbox_group" || nextType === "radio"
+                              ? (prevOpts.allow_other ?? false)
+                              : undefined,
+                          ...(photoHint ?? {}),
+                        }
+                      : nextType === "info"
+                        ? { content: prevOpts.content ?? "" }
+                        : nextType === "image"
+                          ? {
+                              image_url: prevOpts.image_url ?? null,
+                              image_caption: prevOpts.image_caption ?? null,
+                              image_link: prevOpts.image_link ?? null,
+                            }
+                          : nextType === "table"
+                            ? createDefaultTable()
+                            : photoHint,
+                  };
+                })
+              }
+            />
+            {!isInfo ? (
+              <div className="flex items-center gap-1.5">
+                <span className="text-[11px] text-muted-foreground">Largura</span>
                 <SpanPicker
                   value={field.column_span}
                   max={maxSpan}
@@ -618,214 +592,300 @@ export function FieldAccordionItem({
                   }
                 />
               </div>
-              <div className="space-y-1.5">
-                <Label className="text-xs">Seção</Label>
-                <Select
-                  value={field.section_local_id ?? ""}
-                  onValueChange={(value) => onMoveToSection(value)}
+            ) : null}
+            {!isInfo ? (
+              <Select
+                value={field.section_local_id ?? ""}
+                onValueChange={(value) => onMoveToSection(value)}
+              >
+                <SelectTrigger
+                  className="h-8 w-auto min-w-[9rem] max-w-[16rem] px-2 text-xs"
+                  aria-label="Seção"
                 >
-                  <SelectTrigger className="h-9">
-                    <SelectValue placeholder="Seção" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {sections.map((s) => (
-                      <SelectItem key={s.local_id} value={s.local_id}>
-                        {s.title || "(sem título)"}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-          ) : null}
-
-          {!isDisplayOnly && field.type !== "table" ? (
-            <label className="flex cursor-pointer items-center gap-2 rounded-md border bg-background px-3 py-2">
-              <Checkbox
-                checked={field.required}
-                onCheckedChange={(checked) =>
-                  onChange((f) => ({ ...f, required: Boolean(checked) }))
-                }
-              />
-              <span className="text-sm">Campo obrigatório</span>
-            </label>
-          ) : null}
-
-          {!isDisplayOnly ? (
-            <div className="rounded-md border bg-background">
+                  <SelectValue placeholder="Seção" />
+                </SelectTrigger>
+                <SelectContent>
+                  {sections.map((s) => (
+                    <SelectItem key={s.local_id} value={s.local_id}>
+                      {s.title || "(sem título)"}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            ) : null}
+            {showPhoto ? (
               <button
                 type="button"
-                onClick={() => setAdvancedOpen((v) => !v)}
+                onClick={() => onChange((f) => ({ ...f, required: !f.required }))}
+                aria-pressed={field.required}
                 className={cn(
-                  "flex w-full items-center justify-between gap-2 px-3 py-2 text-sm font-medium",
-                  advancedOpen ? "border-b" : "",
+                  "inline-flex h-8 shrink-0 items-center gap-1 rounded-md border px-2 text-xs font-medium transition-colors",
+                  field.required
+                    ? "border-foreground bg-foreground text-background"
+                    : "border-border bg-background text-muted-foreground hover:text-foreground",
                 )}
-                aria-expanded={advancedOpen}
               >
-                <span>Avançado</span>
-                {advancedOpen ? (
-                  <ChevronDown className="h-4 w-4" />
-                ) : (
-                  <ChevronRight className="h-4 w-4" />
-                )}
+                <Asterisk className="h-3 w-3" />
+                Obrigatório
               </button>
-              {advancedOpen ? (
-                <div className="space-y-3 px-3 py-3">
-                  <div className="space-y-1.5">
-                    <Label className="text-xs">Texto de ajuda</Label>
-                    <InlineHtmlEditor
-                      value={field.help_text ?? ""}
-                      onChange={(html) =>
+            ) : null}
+            {showPhoto || showAdjustments ? (
+              <div className="ml-auto flex items-center">
+                {showPhoto ? (
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="ghost"
+                    className="relative h-8 w-8 text-muted-foreground"
+                    onClick={() => setPhotoOpen(true)}
+                    title="Foto de apoio do campo"
+                    aria-label={
+                      imageUrl
+                        ? "Foto de apoio do campo, anexada"
+                        : "Foto de apoio do campo"
+                    }
+                  >
+                    <ImageIcon className="h-3.5 w-3.5" />
+                    {imageUrl ? (
+                      <span className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-foreground" />
+                    ) : null}
+                  </Button>
+                ) : null}
+                {showAdjustments ? (
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="ghost"
+                    className="relative h-8 w-8 text-muted-foreground"
+                    onClick={() => setAdjustmentsOpen(true)}
+                    title="Ajuda e condição"
+                    aria-label={
+                      hasAdjustments
+                        ? "Ajuda e condição, preenchidos"
+                        : "Ajuda e condição"
+                    }
+                  >
+                    <SlidersHorizontal className="h-3.5 w-3.5" />
+                    {hasAdjustments ? (
+                      <span className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-foreground" />
+                    ) : null}
+                  </Button>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+
+          {showPhoto ? (
+            <Dialog open={photoOpen} onOpenChange={setPhotoOpen}>
+              <DialogContent className="max-w-md">
+                <DialogHeader>
+                  <DialogTitle>Foto de apoio</DialogTitle>
+                </DialogHeader>
+                <PhotoHintEditor
+                  templateId={templateId}
+                  scopeKey={`${field.localId}-field`}
+                  imageUrl={imageUrl}
+                  caption={imageCaption}
+                  onChangeImageUrl={(url) =>
+                    onChange((f) => ({
+                      ...f,
+                      options: {
+                        ...((f.options as Exclude<FieldOptions, null>) ?? {}),
+                        image_url: url,
+                      },
+                    }))
+                  }
+                  onChangeCaption={(value) =>
+                    onChange((f) => ({
+                      ...f,
+                      options: {
+                        ...((f.options as Exclude<FieldOptions, null>) ?? {}),
+                        image_caption: value || null,
+                      },
+                    }))
+                  }
+                />
+                <p className="text-[11px] text-muted-foreground">
+                  Aparece como ícone clicável ao lado do título do campo no formulário.
+                </p>
+              </DialogContent>
+            </Dialog>
+          ) : null}
+
+          {showAdjustments ? (
+            <Dialog open={adjustmentsOpen} onOpenChange={setAdjustmentsOpen}>
+              <DialogContent
+                className="max-w-lg"
+                onInteractOutside={(event) => {
+                  const target = event.target;
+                  if (target instanceof Element && target.closest("[role='listbox']")) {
+                    event.preventDefault();
+                  }
+                }}
+                onPointerDownOutside={(event) => {
+                  const target = event.target;
+                  if (target instanceof Element && target.closest("[role='listbox']")) {
+                    event.preventDefault();
+                  }
+                }}
+              >
+                <DialogHeader>
+                  <DialogTitle>Ajustes</DialogTitle>
+                </DialogHeader>
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Texto de ajuda</Label>
+                  <InlineHtmlEditor
+                    value={field.help_text ?? ""}
+                    onBlur={onTextBlur}
+                    onChange={(html) =>
+                      onChange((f) => ({
+                        ...f,
+                        help_text: html || null,
+                      }))
+                    }
+                    placeholder="Instrução auxiliar (opcional)"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="flex cursor-pointer items-center gap-2">
+                    <Checkbox
+                      checked={conditionEnabled}
+                      onCheckedChange={(checked) =>
                         onChange((f) => ({
                           ...f,
-                          help_text: html || null,
+                          visible_when: checked
+                            ? {
+                                field_id: triggerCandidates[0]?.localId ?? "",
+                                op: "truthy",
+                                value: "",
+                              }
+                            : null,
                         }))
                       }
-                      placeholder="Instrução auxiliar (opcional)"
                     />
-                  </div>
-
-                  <div className="space-y-2 rounded-md border border-dashed p-2.5">
-                    <label className="flex cursor-pointer items-center gap-2">
-                      <Checkbox
-                        checked={conditionEnabled}
-                        onCheckedChange={(checked) =>
+                    <span className="text-sm">Exibir apenas se…</span>
+                  </label>
+                  {conditionEnabled && field.visible_when ? (
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      <Select
+                        value={field.visible_when.field_id}
+                        onValueChange={(value) =>
                           onChange((f) => ({
                             ...f,
-                            visible_when: checked
+                            visible_when: f.visible_when
+                              ? { ...f.visible_when, field_id: value }
+                              : null,
+                          }))
+                        }
+                      >
+                        <SelectTrigger className="h-9">
+                          <SelectValue placeholder="Campo" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {triggerCandidates.length === 0 ? (
+                            <SelectItem value="__empty" disabled>
+                              Nenhum campo candidato
+                            </SelectItem>
+                          ) : (
+                            triggerCandidates.map((f) => (
+                              <SelectItem key={f.localId} value={f.localId}>
+                                {fieldPlainLabel(f.label, "(sem label)")}
+                              </SelectItem>
+                            ))
+                          )}
+                        </SelectContent>
+                      </Select>
+                      <Select
+                        value={field.visible_when.op}
+                        onValueChange={(value) =>
+                          onChange((f) => ({
+                            ...f,
+                            visible_when: f.visible_when
                               ? {
-                                  field_id: triggerCandidates[0]?.localId ?? "",
-                                  op: "truthy",
-                                  value: "",
+                                  ...f.visible_when,
+                                  op: value as ConditionOp,
                                 }
                               : null,
                           }))
                         }
-                      />
-                      <span className="text-sm">Exibir apenas se…</span>
-                    </label>
-                    {conditionEnabled && field.visible_when ? (
-                      <div className="grid gap-2 sm:grid-cols-2">
-                        <Select
-                          value={field.visible_when.field_id}
-                          onValueChange={(value) =>
-                            onChange((f) => ({
-                              ...f,
-                              visible_when: f.visible_when
-                                ? { ...f.visible_when, field_id: value }
-                                : null,
-                            }))
-                          }
-                        >
-                          <SelectTrigger className="h-9">
-                            <SelectValue placeholder="Campo" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {triggerCandidates.length === 0 ? (
-                              <SelectItem value="__empty" disabled>
-                                Nenhum campo candidato
-                              </SelectItem>
-                            ) : (
-                              triggerCandidates.map((f) => (
-                                <SelectItem key={f.localId} value={f.localId}>
-                                  {fieldPlainLabel(f.label, "(sem label)")}
-                                </SelectItem>
-                              ))
-                            )}
-                          </SelectContent>
-                        </Select>
-                        <Select
-                          value={field.visible_when.op}
-                          onValueChange={(value) =>
-                            onChange((f) => ({
-                              ...f,
-                              visible_when: f.visible_when
-                                ? {
-                                    ...f.visible_when,
-                                    op: value as ConditionOp,
-                                  }
-                                : null,
-                            }))
-                          }
-                        >
-                          <SelectTrigger className="h-9">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {Object.entries(OP_LABELS).map(([value, label]) => (
-                              <SelectItem key={value} value={value}>
-                                {label}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                        {field.visible_when.op !== "truthy"
-                          ? (() => {
-                              const triggerField = triggerCandidates.find(
-                                (f) => f.localId === field.visible_when?.field_id,
-                              );
-                              const triggerChoices =
-                                triggerField &&
-                                (triggerField.type === "radio" ||
-                                  triggerField.type === "select" ||
-                                  triggerField.type === "checkbox_group")
-                                  ? ((triggerField.options as Exclude<FieldOptions, null>)
-                                      ?.choices ?? [])
-                                  : null;
+                      >
+                        <SelectTrigger className="h-9">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {Object.entries(OP_LABELS).map(([value, label]) => (
+                            <SelectItem key={value} value={value}>
+                              {label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      {field.visible_when.op !== "truthy"
+                        ? (() => {
+                            const triggerField = triggerCandidates.find(
+                              (f) => f.localId === field.visible_when?.field_id,
+                            );
+                            const triggerChoices =
+                              triggerField &&
+                              (triggerField.type === "radio" ||
+                                triggerField.type === "select" ||
+                                triggerField.type === "checkbox_group")
+                                ? ((triggerField.options as Exclude<FieldOptions, null>)
+                                    ?.choices ?? [])
+                                : null;
 
-                              if (triggerChoices && triggerChoices.length > 0) {
-                                return (
-                                  <Select
-                                    value={field.visible_when.value ?? ""}
-                                    onValueChange={(v) =>
-                                      onChange((f) => ({
-                                        ...f,
-                                        visible_when: f.visible_when
-                                          ? { ...f.visible_when, value: v }
-                                          : null,
-                                      }))
-                                    }
-                                  >
-                                    <SelectTrigger className="h-9 sm:col-span-2">
-                                      <SelectValue placeholder="Selecione o valor…" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                      {triggerChoices.map((c) => (
-                                        <SelectItem key={c.value} value={c.value}>
-                                          {c.label}
-                                        </SelectItem>
-                                      ))}
-                                    </SelectContent>
-                                  </Select>
-                                );
-                              }
-
+                            if (triggerChoices && triggerChoices.length > 0) {
                               return (
-                                <Input
-                                  className="sm:col-span-2"
+                                <Select
                                   value={field.visible_when.value ?? ""}
-                                  onChange={(e) =>
+                                  onValueChange={(v) =>
                                     onChange((f) => ({
                                       ...f,
                                       visible_when: f.visible_when
-                                        ? {
-                                            ...f.visible_when,
-                                            value: e.target.value,
-                                          }
+                                        ? { ...f.visible_when, value: v }
                                         : null,
                                     }))
                                   }
-                                  placeholder="Valor"
-                                />
+                                >
+                                  <SelectTrigger className="h-9 sm:col-span-2">
+                                    <SelectValue placeholder="Selecione o valor…" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {triggerChoices.map((c) => (
+                                      <SelectItem key={c.value} value={c.value}>
+                                        {c.label}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
                               );
-                            })()
-                          : null}
-                      </div>
-                    ) : null}
-                  </div>
+                            }
+
+                            return (
+                              <Input
+                                className="sm:col-span-2"
+                                value={field.visible_when.value ?? ""}
+                                onChange={(e) =>
+                                  onChange((f) => ({
+                                    ...f,
+                                    visible_when: f.visible_when
+                                      ? {
+                                          ...f.visible_when,
+                                          value: e.target.value,
+                                        }
+                                      : null,
+                                  }))
+                                }
+                                placeholder="Valor"
+                              />
+                            );
+                          })()
+                        : null}
+                    </div>
+                  ) : null}
                 </div>
-              ) : null}
-            </div>
+              </DialogContent>
+            </Dialog>
           ) : null}
         </div>
       ) : null}
@@ -867,10 +927,11 @@ function ChoicesEditor({
   onToggleAllowOther: (checked: boolean) => void;
 }) {
   const [imageEditorIdx, setImageEditorIdx] = useState<number | null>(null);
+  const [descriptionOpen, setDescriptionOpen] = useState<Record<number, boolean>>({});
   const editingChoice = imageEditorIdx !== null ? choices[imageEditorIdx] : null;
 
   return (
-    <div className="space-y-2 rounded-md border bg-background p-3">
+    <div className="space-y-2">
       <div className="flex items-center justify-between">
         <Label className="text-xs">Opções</Label>
         <Button type="button" size="sm" variant="outline" onClick={onAdd}>
@@ -943,18 +1004,60 @@ function ChoicesEditor({
                       )}
                     />
                   </Button>
+                  {showDescription ? (
+                    <Button
+                      type="button"
+                      size="icon"
+                      variant="ghost"
+                      className={cn(
+                        "h-8 w-8",
+                        choice.description || descriptionOpen[idx]
+                          ? "text-foreground"
+                          : "text-muted-foreground",
+                      )}
+                      title="Descrição da opção"
+                      aria-label="Descrição da opção"
+                      aria-pressed={
+                        Boolean(choice.description) || Boolean(descriptionOpen[idx])
+                      }
+                      onClick={() => {
+                        const visible =
+                          Boolean(choice.description) || Boolean(descriptionOpen[idx]);
+                        if (!visible) {
+                          setDescriptionOpen((prev) => ({ ...prev, [idx]: true }));
+                          return;
+                        }
+                        if (!choice.description) {
+                          setDescriptionOpen((prev) => ({ ...prev, [idx]: false }));
+                        }
+                      }}
+                    >
+                      <AlignLeft className="h-3.5 w-3.5" />
+                    </Button>
+                  ) : null}
                   <Button
                     type="button"
                     size="icon"
                     variant="ghost"
                     className="h-8 w-8"
-                    onClick={() => onRemove(idx)}
+                    onClick={() => {
+                      setDescriptionOpen((prev) => {
+                        const next: Record<number, boolean> = {};
+                        for (const [key, open] of Object.entries(prev)) {
+                          const i = Number(key);
+                          if (i < idx) next[i] = open;
+                          else if (i > idx) next[i - 1] = open;
+                        }
+                        return next;
+                      });
+                      onRemove(idx);
+                    }}
                     aria-label="Remover opção"
                   >
                     <Trash2 className="h-3.5 w-3.5" />
                   </Button>
                 </div>
-                {showDescription ? (
+                {showDescription && (choice.description || descriptionOpen[idx]) ? (
                   <Input
                     value={choice.description ?? ""}
                     onChange={(e) => onChangeDescription(idx, e.target.value)}
@@ -976,10 +1079,6 @@ function ChoicesEditor({
           <span className="text-sm">Incluir opção &quot;Outra&quot; com texto livre</span>
         </label>
       ) : null}
-      <p className="flex items-center gap-1 pt-1 text-[11px] text-muted-foreground">
-        <Star className="h-3 w-3 fill-amber-400 text-amber-500" />
-        Marque as opções preferenciais pela StudioBIM.
-      </p>
 
       <Dialog
         open={imageEditorIdx !== null}
@@ -1021,70 +1120,6 @@ function ChoicesEditor({
   );
 }
 
-function FieldPhotoHint({
-  templateId,
-  fieldLocalId,
-  imageUrl,
-  caption,
-  onChangeImageUrl,
-  onChangeCaption,
-}: {
-  templateId: string;
-  fieldLocalId: string;
-  imageUrl: string | null;
-  caption: string;
-  onChangeImageUrl: (url: string | null) => void;
-  onChangeCaption: (value: string) => void;
-}) {
-  const hasImage = Boolean(imageUrl);
-  const [open, setOpen] = useState(false);
-
-  return (
-    <div className="rounded-md border bg-background">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className={cn(
-          "flex w-full items-center justify-between gap-2 px-3 py-2 text-sm font-medium",
-          open ? "border-b" : "",
-        )}
-        aria-expanded={open}
-      >
-        <span className="flex items-center gap-2">
-          <ImageIcon className="h-3.5 w-3.5" />
-          <span>Foto de apoio do campo</span>
-          {hasImage ? (
-            <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground">
-              anexada
-            </span>
-          ) : null}
-        </span>
-        {open ? (
-          <ChevronDown className="h-4 w-4" />
-        ) : (
-          <ChevronRight className="h-4 w-4" />
-        )}
-      </button>
-      {open ? (
-        <div className="space-y-2 px-3 py-3">
-          <PhotoHintEditor
-            templateId={templateId}
-            scopeKey={`${fieldLocalId}-field`}
-            imageUrl={imageUrl}
-            caption={caption}
-            onChangeImageUrl={onChangeImageUrl}
-            onChangeCaption={onChangeCaption}
-          />
-          <p className="text-[11px] text-muted-foreground">
-            Aparece como ícone clicável ao lado do título do campo no formulário. Útil
-            para mostrar &quot;onde fica isso&quot; ou ilustrar a pergunta.
-          </p>
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
 function RecommendedValueEditor({
   value,
   onChange,
@@ -1100,8 +1135,8 @@ function RecommendedValueEditor({
   const current: "none" | "true" | "false" = value ?? "none";
 
   return (
-    <div className="space-y-2 rounded-md border bg-background p-3">
-      <Label className="text-xs">Recomendação StudioBIM</Label>
+    <div className="space-y-1.5">
+      <Label className="text-xs">StudioBIM recomenda</Label>
       <div className="inline-flex rounded-md border bg-background p-0.5">
         {options.map((opt) => {
           const active = current === opt.key;
@@ -1134,9 +1169,6 @@ function RecommendedValueEditor({
           );
         })}
       </div>
-      <p className="text-[11px] text-muted-foreground">
-        Indica qual resposta é preferida pela StudioBIM.
-      </p>
     </div>
   );
 }
@@ -1205,7 +1237,7 @@ function ImageEditor({
   }
 
   return (
-    <div className="space-y-3 rounded-md border bg-background p-3">
+    <div className="space-y-3">
       <div className="space-y-1.5">
         <Label className="text-xs">Imagem</Label>
         {publicUrl ? (
@@ -1298,13 +1330,9 @@ function ImageEditor({
         <Input
           value={link}
           onChange={(e) => onChangeLink(e.target.value)}
-          placeholder="https://…"
+          placeholder="https://… (clique abre este link; vazio abre a imagem)"
           type="url"
         />
-        <p className="text-[11px] text-muted-foreground">
-          Se preenchido, clicar na imagem abre este link em uma nova aba. Se vazio, clicar
-          abre a imagem em tamanho original.
-        </p>
       </div>
     </div>
   );

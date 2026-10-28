@@ -15,19 +15,37 @@ export async function createTemplate(projectId: string, formData: FormData) {
   const name = String(formData.get("name") ?? "").trim();
   const description = String(formData.get("description") ?? "").trim();
   const disciplineId = String(formData.get("discipline_id") ?? "");
+  const insertBeforeId = String(formData.get("insert_before_id") ?? "").trim();
 
   if (!name) {
     return { error: "Nome é obrigatório." };
   }
 
+  const resolvedDiscipline =
+    disciplineId && disciplineId !== "none" ? disciplineId : null;
+
   const supabase = createClient();
+
+  let position: number | undefined;
+  if (insertBeforeId) {
+    const placed = await positionForInsert(
+      supabase,
+      projectId,
+      resolvedDiscipline,
+      insertBeforeId,
+    );
+    if ("error" in placed) return placed;
+    position = placed.position;
+  }
+
   const { data, error } = await supabase
     .from("cl_form_templates")
     .insert({
       project_id: projectId,
       name,
       description: description || null,
-      discipline_id: disciplineId && disciplineId !== "none" ? disciplineId : null,
+      discipline_id: resolvedDiscipline,
+      ...(position !== undefined ? { position } : {}),
     })
     .select()
     .single();
@@ -38,6 +56,51 @@ export async function createTemplate(projectId: string, formData: FormData) {
 
   revalidatePath(`/projects/${projectId}`);
   redirect(`/templates/${data.id}`);
+}
+
+/** Abre um índice na disciplina e devolve a position do novo formulário. */
+async function positionForInsert(
+  supabase: ReturnType<typeof createClient>,
+  projectId: string,
+  disciplineId: string | null,
+  insertBeforeId: string,
+): Promise<{ position: number } | { error: string }> {
+  const { data: siblings, error } = await supabase
+    .from("cl_form_templates")
+    .select("id, position, discipline_id")
+    .eq("project_id", projectId)
+    .order("position", { ascending: true });
+
+  if (error) return { error: error.message };
+
+  const group = (
+    (siblings ?? []) as Pick<ClFormTemplate, "id" | "position" | "discipline_id">[]
+  ).filter((row) =>
+    disciplineId ? row.discipline_id === disciplineId : row.discipline_id == null,
+  );
+  const beforeIndex = group.findIndex((row) => row.id === insertBeforeId);
+  if (beforeIndex < 0) {
+    return { error: "Não foi possível inserir nesta posição." };
+  }
+
+  const updates = group.flatMap((row, index) => {
+    const nextPosition = index < beforeIndex ? index : index + 1;
+    if (row.position === nextPosition) return [];
+    return [
+      supabase
+        .from("cl_form_templates")
+        .update({ position: nextPosition })
+        .eq("id", row.id)
+        .eq("project_id", projectId),
+    ];
+  });
+
+  const results = await Promise.all(updates);
+  for (const result of results) {
+    if (result.error) return { error: result.error.message };
+  }
+
+  return { position: beforeIndex };
 }
 
 export async function importExistingTemplate(

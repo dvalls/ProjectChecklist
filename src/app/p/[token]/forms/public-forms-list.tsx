@@ -146,8 +146,8 @@ export function PublicFormsList({
         map.set(t.id, {
           done: total,
           total,
-          doneAll: serverTotalAll || 1,
-          totalAll: serverTotalAll || 1,
+          doneAll: serverTotalAll,
+          totalAll: serverTotalAll,
         });
         continue;
       }
@@ -156,7 +156,10 @@ export function PublicFormsList({
       const draftTotalAll = draft?.totalAll;
       const draftDoneAll = draft?.doneAll;
       const useDraft = typeof draftTotalAll === "number" && draftTotalAll > 0;
-      const totalAll = useDraft ? draftTotalAll! : serverTotalAll;
+      const totalAll = Math.min(
+        useDraft ? draftTotalAll! : serverTotalAll,
+        serverTotalAll,
+      );
       const baseDoneAll = useDraft
         ? Math.min(draftDoneAll ?? 0, draftTotalAll!)
         : serverAnsweredAll;
@@ -217,6 +220,23 @@ export function PublicFormsList({
   const canSubmitAll =
     pendingTemplates.length > 0 &&
     readyPendingTemplates.length === pendingTemplates.length;
+
+  const filledByUser = useMemo(() => {
+    let count = 0;
+    for (const t of templates) {
+      if (completedByTemplate.has(t.id)) continue;
+      const progress = progressByTemplate.get(t.id);
+      if (!progress || progress.totalAll <= 0) continue;
+      const safeDoneAll = Math.min(progress.doneAll, progress.totalAll);
+      const serverAnsweredAll = Math.min(
+        answeredAllByTemplate[t.id] ?? 0,
+        progress.totalAll,
+      );
+      const previousAnswered = Math.min(serverAnsweredAll, safeDoneAll);
+      count += Math.max(0, safeDoneAll - previousAnswered);
+    }
+    return count;
+  }, [templates, progressByTemplate, completedByTemplate, answeredAllByTemplate]);
 
   function formatQuestionCount(count: number, singular: string, plural: string) {
     return `${count} ${count === 1 ? singular : plural}`;
@@ -422,7 +442,7 @@ export function PublicFormsList({
                         progress.totalAll > 0
                           ? (currentAnswered / progress.totalAll) * 100
                           : 0;
-                      const showProgressBar = progress.totalAll > 0 || completed;
+                      const showProgressBar = progress.totalAll > 0;
                       return (
                         <Link
                           key={t.id}
@@ -548,7 +568,9 @@ export function PublicFormsList({
             <div className="min-w-0">
               <p className="text-sm font-medium">Envio geral</p>
               <p className="mt-0.5 text-xs text-muted-foreground">
-                Preencha os formulários e use este botão para enviar tudo de uma vez.
+                {filledByUser === 0
+                  ? "Nenhum item preenchido."
+                  : `${formatQuestionCount(filledByUser, "item preenchido", "itens preenchidos")}.`}
               </p>
             </div>
             <Button

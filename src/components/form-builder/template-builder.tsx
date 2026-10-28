@@ -1,11 +1,13 @@
 "use client";
 
 import {
+  Fragment,
   useEffect,
   useMemo,
   useRef,
   useState,
   useTransition,
+  type MouseEvent,
   type ReactNode,
 } from "react";
 import { useRouter } from "next/navigation";
@@ -33,6 +35,7 @@ import {
 import {
   SortableContext,
   arrayMove,
+  rectSortingStrategy,
   sortableKeyboardCoordinates,
   useSortable,
   verticalListSortingStrategy,
@@ -52,6 +55,17 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
+import {
+  closeCoalesce,
+  createEditorHistory,
+  isTextEditingTarget,
+  pushCoalesced,
+  pushDiscrete,
+  redo as redoHistory,
+  snapshotsEqual,
+  undo as undoHistory,
+  type EditorSnapshot,
+} from "@/lib/forms/editor-history";
 import { relocateInGroup, reorderInGroup } from "@/lib/forms/reorder-groups";
 
 import { Button } from "@/components/ui/button";
@@ -93,12 +107,9 @@ import type {
   ClFormField,
   ClFormSection,
   ClFormTemplate,
-  ColumnSpan,
   FieldOptions,
   FieldType,
   LayoutMode,
-  SectionColumns,
-  VisibleWhen,
 } from "@/lib/supabase/types";
 
 import {
@@ -118,30 +129,11 @@ import { evaluateVisible, isDisplayOnly, makeFieldKey } from "@/lib/forms/utils"
 import { FieldInputControl } from "./field-input";
 import { FieldAccordionItem } from "./field-accordion-item";
 import { ColumnsPicker, FIELD_TYPE_ORDER, TYPE_META } from "./shared";
+import type { EditorField, EditorSection } from "./editor-model";
 
-export interface EditorSection {
-  local_id: string;
-  id?: string;
-  title: string;
-  subtitle: string | null;
-  columns: SectionColumns;
-}
+export type { EditorField, EditorSection };
 
 type EditorFocus = { kind: "section" | "field"; id: string };
-
-export interface EditorField {
-  localId: string;
-  id?: string;
-  section_local_id: string | null;
-  group_key: string | null;
-  label: string;
-  help_text: string | null;
-  type: FieldType;
-  required: boolean;
-  column_span: ColumnSpan;
-  options: FieldOptions;
-  visible_when: VisibleWhen | null;
-}
 
 function newLocalId(prefix = "new") {
   return `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
@@ -160,6 +152,32 @@ const fieldOrder = {
 
 function sectionIdFromDrop(id: string): string | null {
   return id.startsWith(SECTION_DROP_PREFIX) ? id.slice(SECTION_DROP_PREFIX.length) : null;
+}
+
+function sectionCoalesceKey(before: EditorSection, after: EditorSection): string | null {
+  if (before.columns !== after.columns || before.local_id !== after.local_id) return null;
+  const titleChanged = before.title !== after.title;
+  const subtitleChanged = (before.subtitle ?? null) !== (after.subtitle ?? null);
+  if (titleChanged === subtitleChanged) return null;
+  return `section:${before.local_id}:${titleChanged ? "title" : "subtitle"}`;
+}
+
+function fieldCoalesceKey(before: EditorField, after: EditorField): string | null {
+  if (
+    before.type !== after.type ||
+    before.required !== after.required ||
+    before.column_span !== after.column_span ||
+    before.section_local_id !== after.section_local_id ||
+    before.group_key !== after.group_key ||
+    JSON.stringify(before.options) !== JSON.stringify(after.options) ||
+    JSON.stringify(before.visible_when) !== JSON.stringify(after.visible_when)
+  ) {
+    return null;
+  }
+  const labelChanged = before.label !== after.label;
+  const helpChanged = (before.help_text ?? null) !== (after.help_text ?? null);
+  if (labelChanged === helpChanged) return null;
+  return `field:${before.localId}:${labelChanged ? "label" : "help"}`;
 }
 
 function sectionsFromInitial(sections: ClFormSection[]): EditorSection[] {
@@ -333,8 +351,19 @@ export function TemplateBuilder({
   const fieldsSnapshot = useRef<EditorField[] | null>(null);
   const lastOverId = useRef<string | null>(null);
   const recentlyMovedToNewContainer = useRef(false);
+  const historyRef = useRef(createEditorHistory<EditorSnapshot>());
+  const dragBaselineRef = useRef<EditorSnapshot | null>(null);
+  const docRef = useRef<EditorSnapshot>({
+    name,
+    description,
+    layoutMode,
+    environments,
+    sections,
+    fields,
+  });
   sectionsRef.current = sections;
   fieldsRef.current = fields;
+  docRef.current = { name, description, layoutMode, environments, sections, fields };
 
   useEffect(() => {
     requestAnimationFrame(() => {
@@ -346,6 +375,83 @@ export function TemplateBuilder({
     fieldsRef.current = next;
     setFields(next);
   }
+
+  function snapshotFromRefs(): EditorSnapshot {
+    return {
+      name: docRef.current.name,
+      description: docRef.current.description,
+      layoutMode: docRef.current.layoutMode,
+      environments: docRef.current.environments,
+      sections: sectionsRef.current,
+      fields: fieldsRef.current,
+    };
+  }
+
+  function patchDoc(
+    partial: Partial<EditorSnapshot>,
+    mode: { kind: "discrete" } | { kind: "coalesced"; key: string },
+  ) {
+    const current = docRef.current;
+    const next: EditorSnapshot = { ...current, ...partial };
+    if (snapshotsEqual(current, next)) return;
+    if (mode.kind === "coalesced") pushCoalesced(historyRef.current, mode.key, current);
+    else pushDiscrete(historyRef.current, current);
+    docRef.current = next;
+    sectionsRef.current = next.sections;
+    fieldsRef.current = next.fields;
+    if ("name" in partial) setName(next.name);
+    if ("description" in partial) setDescription(next.description);
+    if ("layoutMode" in partial) setLayoutMode(next.layoutMode);
+    if ("environments" in partial) setEnvironments(next.environments);
+    if ("sections" in partial) setSections(next.sections);
+    if ("fields" in partial) setFields(next.fields);
+  }
+
+  function closeHistory() {
+    closeCoalesce(historyRef.current, docRef.current);
+  }
+
+  const applySnapshotRef = useRef<(snapshot: EditorSnapshot) => void>(() => {});
+  applySnapshotRef.current = (snapshot) => {
+    docRef.current = snapshot;
+    sectionsRef.current = snapshot.sections;
+    fieldsRef.current = snapshot.fields;
+    setName(snapshot.name);
+    setDescription(snapshot.description);
+    setLayoutMode(snapshot.layoutMode);
+    setEnvironments(snapshot.environments);
+    setSections(snapshot.sections);
+    setFields(snapshot.fields);
+    setExpandedFieldLocalId((current) =>
+      current && snapshot.fields.some((field) => field.localId === current)
+        ? current
+        : null,
+    );
+  };
+
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      const meta = event.metaKey || event.ctrlKey;
+      if (!meta || event.altKey) return;
+      const key = event.key.toLowerCase();
+      const wantsUndo = key === "z" && !event.shiftKey;
+      const wantsRedo =
+        (key === "z" && event.shiftKey) || (key === "y" && !event.shiftKey);
+      if (!wantsUndo && !wantsRedo) return;
+      if (isTextEditingTarget(event.target)) return;
+
+      const snapshot = wantsUndo
+        ? undoHistory(historyRef.current, docRef.current)
+        : redoHistory(historyRef.current, docRef.current);
+      if (!snapshot) return;
+      event.preventDefault();
+      event.stopPropagation();
+      applySnapshotRef.current(snapshot);
+    }
+
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, []);
 
   const collisionDetection: CollisionDetection = (args) => {
     const activeId = String(args.active.id);
@@ -475,89 +581,114 @@ export function TemplateBuilder({
       subtitle: null,
       columns: 3,
     };
-    setSections((prev) => [...prev, newSection]);
+    patchDoc({ sections: [...sectionsRef.current, newSection] }, { kind: "discrete" });
   }
 
   function updateSection(localId: string, updater: (s: EditorSection) => EditorSection) {
-    setSections((prev) => prev.map((s) => (s.local_id === localId ? updater(s) : s)));
+    const prev = sectionsRef.current;
+    const next = prev.map((s) => (s.local_id === localId ? updater(s) : s));
+    const before = prev.find((s) => s.local_id === localId);
+    const after = next.find((s) => s.local_id === localId);
+    const key = before && after ? sectionCoalesceKey(before, after) : null;
+    patchDoc({ sections: next }, key ? { kind: "coalesced", key } : { kind: "discrete" });
   }
 
   function deleteSection(localId: string) {
-    setSections((prev) => {
-      if (prev.length <= 1) {
-        toast.error("Mantenha pelo menos uma seção.");
-        return prev;
-      }
-      return prev.filter((s) => s.local_id !== localId);
-    });
-    setFields((prev) =>
-      prev.map((f) =>
-        f.section_local_id === localId
-          ? { ...f, section_local_id: sections[0]?.local_id ?? null }
-          : f,
-      ),
+    const prevSections = sectionsRef.current;
+    if (prevSections.length <= 1) {
+      toast.error("Mantenha pelo menos uma seção.");
+      return;
+    }
+    const fallback = prevSections[0]?.local_id ?? null;
+    patchDoc(
+      {
+        sections: prevSections.filter((s) => s.local_id !== localId),
+        fields: fieldsRef.current.map((f) =>
+          f.section_local_id === localId ? { ...f, section_local_id: fallback } : f,
+        ),
+      },
+      { kind: "discrete" },
     );
   }
 
-  function addField(sectionLocalId: string, type: FieldType = "text") {
+  function addField(
+    sectionLocalId: string,
+    type: FieldType = "text",
+    afterLocalId?: string,
+  ) {
     const localId = newLocalId();
-    setFields((prev) => [
-      ...prev,
-      {
-        localId,
-        section_local_id: sectionLocalId,
-        group_key: null,
-        label: "",
-        help_text: null,
-        type,
-        required: false,
-        column_span: type === "table" ? 4 : 1,
-        options: defaultOptionsFor(type),
-        visible_when: null,
-      },
-    ]);
+    const created: EditorField = {
+      localId,
+      section_local_id: sectionLocalId,
+      group_key: null,
+      label: "",
+      help_text: null,
+      type,
+      required: false,
+      column_span: type === "table" ? 4 : 1,
+      options: defaultOptionsFor(type),
+      visible_when: null,
+    };
+    const prev = fieldsRef.current;
+    const index = afterLocalId
+      ? prev.findIndex((field) => field.localId === afterLocalId)
+      : -1;
+    const next = [...prev];
+    if (index < 0) next.push(created);
+    else next.splice(index + 1, 0, created);
+    patchDoc({ fields: next }, { kind: "discrete" });
     setExpandedFieldLocalId(localId);
     setJustCreatedLocalId(localId);
-    setCollapsedSections((prev) => {
-      const next = new Set(prev);
-      next.delete(sectionLocalId);
-      return next;
+    setCollapsedSections((prevCollapsed) => {
+      const expanded = new Set(prevCollapsed);
+      expanded.delete(sectionLocalId);
+      return expanded;
     });
   }
 
   function updateField(localId: string, updater: (f: EditorField) => EditorField) {
-    setFields((prev) => prev.map((f) => (f.localId === localId ? updater(f) : f)));
+    const prev = fieldsRef.current;
+    const next = prev.map((f) => (f.localId === localId ? updater(f) : f));
+    const before = prev.find((f) => f.localId === localId);
+    const after = next.find((f) => f.localId === localId);
+    const key = before && after ? fieldCoalesceKey(before, after) : null;
+    patchDoc({ fields: next }, key ? { kind: "coalesced", key } : { kind: "discrete" });
   }
 
   function deleteField(localId: string) {
-    setFields((prev) => prev.filter((f) => f.localId !== localId));
+    patchDoc(
+      { fields: fieldsRef.current.filter((f) => f.localId !== localId) },
+      { kind: "discrete" },
+    );
     if (expandedFieldLocalId === localId) setExpandedFieldLocalId(null);
   }
 
   function duplicateField(localId: string) {
-    setFields((prev) => {
-      const idx = prev.findIndex((f) => f.localId === localId);
-      if (idx < 0) return prev;
-      const original = prev[idx];
-      const copy: EditorField = {
-        ...original,
-        localId: newLocalId(),
-        id: undefined,
-        label: original.label ? `${original.label} (cópia)` : "",
-      };
-      const next = [...prev];
-      next.splice(idx + 1, 0, copy);
-      setExpandedFieldLocalId(copy.localId);
-      setJustCreatedLocalId(null);
-      return next;
-    });
+    const prev = fieldsRef.current;
+    const idx = prev.findIndex((f) => f.localId === localId);
+    if (idx < 0) return;
+    const original = prev[idx];
+    const copy: EditorField = {
+      ...original,
+      localId: newLocalId(),
+      id: undefined,
+      label: original.label ? `${original.label} (cópia)` : "",
+    };
+    const next = [...prev];
+    next.splice(idx + 1, 0, copy);
+    patchDoc({ fields: next }, { kind: "discrete" });
+    setExpandedFieldLocalId(copy.localId);
+    setJustCreatedLocalId(null);
   }
 
   function moveField(localId: string, sectionLocalId: string) {
-    setFields((prev) =>
-      prev.map((f) =>
-        f.localId === localId ? { ...f, section_local_id: sectionLocalId } : f,
-      ),
+    patchDoc(
+      {
+        fields: fieldsRef.current.map((f) =>
+          f.localId === localId ? { ...f, section_local_id: sectionLocalId } : f,
+        ),
+      },
+      { kind: "discrete" },
     );
   }
 
@@ -569,9 +700,13 @@ export function TemplateBuilder({
 
   function handleDragStart(event: DragStartEvent) {
     const activeId = String(event.active.id);
-    fieldsSnapshot.current = fieldsRef.current.some((field) => field.localId === activeId)
-      ? fieldsRef.current
-      : null;
+    const draggingField = fieldsRef.current.some((field) => field.localId === activeId);
+    const draggingSection = sectionsRef.current.some(
+      (section) => section.local_id === activeId,
+    );
+    fieldsSnapshot.current = draggingField ? fieldsRef.current : null;
+    dragBaselineRef.current =
+      draggingField || draggingSection ? structuredClone(snapshotFromRefs()) : null;
     lastOverId.current = null;
   }
 
@@ -619,68 +754,79 @@ export function TemplateBuilder({
   function handleDragCancel() {
     if (fieldsSnapshot.current) commitFields(fieldsSnapshot.current);
     fieldsSnapshot.current = null;
+    dragBaselineRef.current = null;
     lastOverId.current = null;
   }
 
   function handleDragEnd(event: DragEndEvent) {
-    const { active, over } = event;
+    const baseline = dragBaselineRef.current;
+    dragBaselineRef.current = null;
     fieldsSnapshot.current = null;
-    if (!over || active.id === over.id) return;
+    try {
+      const { active, over } = event;
+      if (!over || active.id === over.id) return;
 
-    const activeId = String(active.id);
-    const overId = String(over.id);
-    const sectionIds = new Set(sectionsRef.current.map((section) => section.local_id));
+      const activeId = String(active.id);
+      const overId = String(over.id);
+      const sectionIds = new Set(sectionsRef.current.map((section) => section.local_id));
 
-    if (sectionIds.has(activeId)) {
-      setSections((prev) => {
+      if (sectionIds.has(activeId)) {
+        const prev = sectionsRef.current;
         const oldIndex = prev.findIndex((section) => section.local_id === activeId);
         const newIndex = prev.findIndex((section) => section.local_id === overId);
-        if (oldIndex < 0 || newIndex < 0 || oldIndex === newIndex) return prev;
-        return arrayMove(prev, oldIndex, newIndex);
-      });
-      return;
-    }
+        if (oldIndex < 0 || newIndex < 0 || oldIndex === newIndex) return;
+        const next = arrayMove(prev, oldIndex, newIndex);
+        sectionsRef.current = next;
+        setSections(next);
+        return;
+      }
 
-    const activeField = fieldsRef.current.find((field) => field.localId === activeId);
-    if (!activeField) return;
+      const activeField = fieldsRef.current.find((field) => field.localId === activeId);
+      if (!activeField) return;
 
-    const overField = fieldsRef.current.find((field) => field.localId === overId);
-    const targetSection = targetSectionId(overId);
-    if (targetSection && targetSection !== activeField.section_local_id) {
-      const next = relocateInGroup(
+      const overField = fieldsRef.current.find((field) => field.localId === overId);
+      const targetSection = targetSectionId(overId);
+      if (targetSection && targetSection !== activeField.section_local_id) {
+        const next = relocateInGroup(
+          fieldsRef.current,
+          activeId,
+          targetSection,
+          overField?.localId ?? null,
+          false,
+          fieldOrder.idOf,
+          fieldOrder.groupOf,
+          fieldOrder.setGroup,
+        );
+        if (next !== fieldsRef.current) commitFields(next);
+        if (targetSection) {
+          setCollapsedSections((prev) => {
+            if (!prev.has(targetSection)) return prev;
+            const expanded = new Set(prev);
+            expanded.delete(targetSection);
+            return expanded;
+          });
+        }
+        return;
+      }
+
+      if (!overField || overField.section_local_id !== activeField.section_local_id)
+        return;
+      if (!activeField.section_local_id) return;
+
+      const next = reorderInGroup(
         fieldsRef.current,
+        activeField.section_local_id,
         activeId,
-        targetSection,
-        overField?.localId ?? null,
-        false,
+        overId,
         fieldOrder.idOf,
         fieldOrder.groupOf,
-        fieldOrder.setGroup,
       );
       if (next !== fieldsRef.current) commitFields(next);
-      if (targetSection) {
-        setCollapsedSections((prev) => {
-          if (!prev.has(targetSection)) return prev;
-          const expanded = new Set(prev);
-          expanded.delete(targetSection);
-          return expanded;
-        });
+    } finally {
+      if (baseline && !snapshotsEqual(baseline, snapshotFromRefs())) {
+        pushDiscrete(historyRef.current, baseline);
       }
-      return;
     }
-
-    if (!overField || overField.section_local_id !== activeField.section_local_id) return;
-    if (!activeField.section_local_id) return;
-
-    const next = reorderInGroup(
-      fieldsRef.current,
-      activeField.section_local_id,
-      activeId,
-      overId,
-      fieldOrder.idOf,
-      fieldOrder.groupOf,
-    );
-    if (next !== fieldsRef.current) commitFields(next);
   }
 
   function handleSave() {
@@ -746,7 +892,7 @@ export function TemplateBuilder({
       if (res?.error) {
         toast.error(res.error);
       } else {
-        setName(renameValue.trim());
+        patchDoc({ name: renameValue.trim() }, { kind: "discrete" });
         setRenameOpen(false);
         toast.success("Formulário renomeado.");
       }
@@ -809,7 +955,10 @@ export function TemplateBuilder({
         <div className="min-w-0 flex-1">
           <Input
             value={name}
-            onChange={(e) => setName(e.target.value)}
+            onChange={(e) =>
+              patchDoc({ name: e.target.value }, { kind: "coalesced", key: "name" })
+            }
+            onBlur={closeHistory}
             className="h-auto border-0 bg-transparent px-0 text-lg font-semibold shadow-none focus-visible:ring-0 sm:text-xl"
             placeholder="Nome do formulário"
           />
@@ -834,7 +983,13 @@ export function TemplateBuilder({
                   <Label className="text-xs">Descrição</Label>
                   <Textarea
                     value={description}
-                    onChange={(e) => setDescription(e.target.value)}
+                    onChange={(e) =>
+                      patchDoc(
+                        { description: e.target.value },
+                        { kind: "coalesced", key: "description" },
+                      )
+                    }
+                    onBlur={closeHistory}
                     rows={2}
                     placeholder="Descrição (opcional)"
                   />
@@ -843,7 +998,9 @@ export function TemplateBuilder({
                   <Label className="text-xs">Modo de layout</Label>
                   <Select
                     value={layoutMode}
-                    onValueChange={(v) => setLayoutMode(v as LayoutMode)}
+                    onValueChange={(v) =>
+                      patchDoc({ layoutMode: v as LayoutMode }, { kind: "discrete" })
+                    }
                   >
                     <SelectTrigger>
                       <SelectValue />
@@ -859,7 +1016,12 @@ export function TemplateBuilder({
                   </p>
                 </div>
                 {layoutMode === "matrix" ? (
-                  <EnvironmentsEditor value={environments} onChange={setEnvironments} />
+                  <EnvironmentsEditor
+                    value={environments}
+                    onChange={(next) =>
+                      patchDoc({ environments: next }, { kind: "discrete" })
+                    }
+                  />
                 ) : null}
               </div>
             </DialogContent>
@@ -993,6 +1155,7 @@ export function TemplateBuilder({
 
                             <Input
                               value={section.title}
+                              onBlur={closeHistory}
                               onChange={(e) =>
                                 updateSection(section.local_id, (s) => ({
                                   ...s,
@@ -1004,6 +1167,7 @@ export function TemplateBuilder({
                             />
                             <Input
                               value={section.subtitle ?? ""}
+                              onBlur={closeHistory}
                               onChange={(e) =>
                                 updateSection(section.local_id, (s) => ({
                                   ...s,
@@ -1052,31 +1216,48 @@ export function TemplateBuilder({
                                   strategy={verticalListSortingStrategy}
                                 >
                                   <div className="space-y-1.5">
-                                    {sectionFields.map((field) => (
-                                      <FieldAccordionItem
-                                        key={field.localId}
-                                        field={field}
-                                        sections={sections}
-                                        allFields={fields}
-                                        templateId={template.id}
-                                        expanded={expandedFieldLocalId === field.localId}
-                                        highlighted={
-                                          editorFocus?.kind === "field" &&
-                                          editorFocus.id === field.localId
-                                        }
-                                        autoFocusLabel={
-                                          justCreatedLocalId === field.localId
-                                        }
-                                        onToggle={() => toggleField(field.localId)}
-                                        onChange={(updater) =>
-                                          updateField(field.localId, updater)
-                                        }
-                                        onDelete={() => deleteField(field.localId)}
-                                        onDuplicate={() => duplicateField(field.localId)}
-                                        onMoveToSection={(secId) =>
-                                          moveField(field.localId, secId)
-                                        }
-                                      />
+                                    {sectionFields.map((field, index) => (
+                                      <Fragment key={field.localId}>
+                                        {index > 0 ? (
+                                          <InsertFieldSlot
+                                            onAdd={(type) =>
+                                              addField(
+                                                section.local_id,
+                                                type,
+                                                sectionFields[index - 1]?.localId,
+                                              )
+                                            }
+                                          />
+                                        ) : null}
+                                        <FieldAccordionItem
+                                          field={field}
+                                          sections={sections}
+                                          allFields={fields}
+                                          templateId={template.id}
+                                          expanded={
+                                            expandedFieldLocalId === field.localId
+                                          }
+                                          highlighted={
+                                            editorFocus?.kind === "field" &&
+                                            editorFocus.id === field.localId
+                                          }
+                                          autoFocusLabel={
+                                            justCreatedLocalId === field.localId
+                                          }
+                                          onToggle={() => toggleField(field.localId)}
+                                          onTextBlur={closeHistory}
+                                          onChange={(updater) =>
+                                            updateField(field.localId, updater)
+                                          }
+                                          onDelete={() => deleteField(field.localId)}
+                                          onDuplicate={() =>
+                                            duplicateField(field.localId)
+                                          }
+                                          onMoveToSection={(secId) =>
+                                            moveField(field.localId, secId)
+                                          }
+                                        />
+                                      </Fragment>
                                     ))}
                                   </div>
                                 </SortableContext>
@@ -1155,6 +1336,11 @@ export function TemplateBuilder({
                   onFocusField={(localId) =>
                     revealInEditor({ kind: "field", id: localId })
                   }
+                  collisionDetection={collisionDetection}
+                  onDragStart={handleDragStart}
+                  onDragOver={handleDragOver}
+                  onDragCancel={handleDragCancel}
+                  onDragEnd={handleDragEnd}
                 />
               </CardContent>
             </Card>
@@ -1238,46 +1424,88 @@ export function TemplateBuilder({
   );
 }
 
+function FieldTypePicker({
+  onAdd,
+  onCancel,
+}: {
+  onAdd: (type: FieldType) => void;
+  onCancel: () => void;
+}) {
+  return (
+    <div className="rounded-md border bg-muted/30 p-2">
+      <div className="mb-1.5 flex items-center justify-between">
+        <span className="text-xs font-medium">Escolha um tipo</span>
+        <button
+          type="button"
+          className="text-xs text-muted-foreground hover:text-foreground"
+          onClick={onCancel}
+        >
+          Cancelar
+        </button>
+      </div>
+      <div className="grid grid-cols-3 gap-1.5 sm:grid-cols-4 md:grid-cols-5">
+        {FIELD_TYPE_ORDER.map((t) => {
+          const meta = TYPE_META[t];
+          const Icon = meta.icon;
+          return (
+            <button
+              key={t}
+              type="button"
+              onClick={() => onAdd(t)}
+              className={cn(
+                "flex flex-col items-center gap-1 rounded-md border bg-background px-2 py-2 text-[11px] transition-colors hover:bg-foreground hover:text-background",
+              )}
+              title={meta.description}
+            >
+              <Icon className="h-4 w-4" />
+              <span className="truncate">{meta.short}</span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function InsertFieldSlot({ onAdd }: { onAdd: (type: FieldType) => void }) {
+  const [open, setOpen] = useState(false);
+  if (open) {
+    return (
+      <FieldTypePicker
+        onAdd={(type) => {
+          onAdd(type);
+          setOpen(false);
+        }}
+        onCancel={() => setOpen(false)}
+      />
+    );
+  }
+  return (
+    <div className="flex justify-center">
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="flex h-6 items-center gap-1 rounded-full border border-dashed bg-background px-2.5 text-[11px] text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground"
+      >
+        <Plus className="h-3 w-3" />
+        Inserir
+      </button>
+    </div>
+  );
+}
+
 function AddFieldBar({ onAdd }: { onAdd: (type: FieldType) => void }) {
   const [open, setOpen] = useState(false);
   return (
     <div className="pt-1">
       {open ? (
-        <div className="rounded-md border bg-muted/30 p-2">
-          <div className="mb-1.5 flex items-center justify-between">
-            <span className="text-xs font-medium">Escolha um tipo</span>
-            <button
-              type="button"
-              className="text-xs text-muted-foreground hover:text-foreground"
-              onClick={() => setOpen(false)}
-            >
-              Cancelar
-            </button>
-          </div>
-          <div className="grid grid-cols-3 gap-1.5 sm:grid-cols-4 md:grid-cols-5">
-            {FIELD_TYPE_ORDER.map((t) => {
-              const meta = TYPE_META[t];
-              const Icon = meta.icon;
-              return (
-                <button
-                  key={t}
-                  type="button"
-                  onClick={() => {
-                    onAdd(t);
-                    setOpen(false);
-                  }}
-                  className={cn(
-                    "flex flex-col items-center gap-1 rounded-md border bg-background px-2 py-2 text-[11px] transition-colors hover:bg-foreground hover:text-background",
-                  )}
-                  title={meta.description}
-                >
-                  <Icon className="h-4 w-4" />
-                  <span className="truncate">{meta.short}</span>
-                </button>
-              );
-            })}
-          </div>
-        </div>
+        <FieldTypePicker
+          onAdd={(type) => {
+            onAdd(type);
+            setOpen(false);
+          }}
+          onCancel={() => setOpen(false)}
+        />
       ) : (
         <Button
           type="button"
@@ -1334,6 +1562,98 @@ function previewClickFocusesEditor(target: EventTarget | null) {
   return !(target instanceof Element && target.closest(PREVIEW_CONTROL_SELECTOR));
 }
 
+function PreviewSortableSection({
+  id,
+  children,
+}: {
+  id: string;
+  children: (dragHandle: ReactNode) => ReactNode;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
+    useSortable({ id });
+
+  const dragHandle = (
+    <button
+      type="button"
+      className={cn(
+        "pointer-events-none absolute left-0 top-0 z-10 flex h-5 w-5 cursor-grab items-center justify-center rounded bg-background/90 text-muted-foreground/70 opacity-0 shadow-sm ring-1 ring-border transition-opacity hover:text-foreground focus-visible:pointer-events-auto focus-visible:opacity-100 active:cursor-grabbing group-hover/section:pointer-events-auto group-hover/section:opacity-100",
+        isDragging && "pointer-events-auto opacity-100",
+      )}
+      aria-label="Arrastar seção"
+      title="Arrastar para reordenar"
+      onClick={(event) => event.stopPropagation()}
+      {...attributes}
+      {...listeners}
+    >
+      <GripVertical className="h-3.5 w-3.5" />
+    </button>
+  );
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={{
+        transform: CSS.Transform.toString(transform),
+        transition,
+        opacity: isDragging ? 0.6 : 1,
+        position: "relative",
+        zIndex: isDragging ? 10 : undefined,
+      }}
+      className="space-y-3"
+    >
+      {children(dragHandle)}
+    </div>
+  );
+}
+
+function PreviewSortableField({
+  id,
+  span,
+  children,
+  onClick,
+}: {
+  id: string;
+  span: number;
+  children: ReactNode;
+  onClick: (event: MouseEvent<HTMLDivElement>) => void;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
+    useSortable({ id });
+
+  return (
+    <div
+      ref={setNodeRef}
+      title="Mostrar campo no editor"
+      onClick={onClick}
+      className="group relative cursor-pointer rounded-sm transition-shadow hover:ring-2 hover:ring-primary/30"
+      style={{
+        gridColumn: `span ${span}`,
+        transform: CSS.Transform.toString(transform),
+        transition,
+        opacity: isDragging ? 0.45 : 1,
+        position: "relative",
+        zIndex: isDragging ? 10 : undefined,
+      }}
+    >
+      <button
+        type="button"
+        className={cn(
+          "pointer-events-none absolute left-0 top-0 z-10 flex h-5 w-5 cursor-grab items-center justify-center rounded bg-background/90 text-muted-foreground/70 opacity-0 shadow-sm ring-1 ring-border transition-opacity hover:text-foreground focus-visible:pointer-events-auto focus-visible:opacity-100 active:cursor-grabbing group-hover:pointer-events-auto group-hover:opacity-100",
+          isDragging && "pointer-events-auto opacity-100",
+        )}
+        aria-label="Arrastar campo"
+        title="Arrastar para reordenar"
+        onClick={(event) => event.stopPropagation()}
+        {...attributes}
+        {...listeners}
+      >
+        <GripVertical className="h-3 w-3" />
+      </button>
+      <div className="min-w-0">{children}</div>
+    </div>
+  );
+}
+
 function PreviewBody({
   templateId,
   previewSections,
@@ -1342,6 +1662,11 @@ function PreviewBody({
   compact = false,
   onFocusSection,
   onFocusField,
+  collisionDetection,
+  onDragStart,
+  onDragOver,
+  onDragCancel,
+  onDragEnd,
 }: {
   templateId: string;
   previewSections: { section: EditorSection; fields: EditorField[] }[];
@@ -1350,9 +1675,20 @@ function PreviewBody({
   compact?: boolean;
   onFocusSection: (localId: string) => void;
   onFocusField: (localId: string) => void;
+  collisionDetection: CollisionDetection;
+  onDragStart: (event: DragStartEvent) => void;
+  onDragOver: (event: DragOverEvent) => void;
+  onDragCancel: () => void;
+  onDragEnd: (event: DragEndEvent) => void;
 }) {
   const [values, setValues] = useState<Record<string, FieldValue>>(() =>
     buildInitialValues(previewSections),
+  );
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    }),
   );
 
   function setFieldValue(key: string, patch: Partial<FieldValue>) {
@@ -1377,75 +1713,111 @@ function PreviewBody({
   const isMatrix = layoutMode === "matrix";
 
   return (
-    <div className={cn("space-y-6", compact && "space-y-4 text-sm")}>
-      <div className="flex items-center justify-between gap-2">
-        <p className="text-[11px] text-muted-foreground">
-          {isMatrix
-            ? `Matriz: ${environments.join(" • ")}. `
-            : "Preencha os campos para testar exibições condicionais. "}
-          Clique numa seção ou num campo para localizá-lo no editor.
-        </p>
-        <button
-          type="button"
-          onClick={resetValues}
-          className="shrink-0 text-[11px] text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
-        >
-          Limpar
-        </button>
-      </div>
+    <DndContext
+      sensors={sensors}
+      collisionDetection={collisionDetection}
+      measuring={{ droppable: { strategy: MeasuringStrategy.Always } }}
+      onDragStart={onDragStart}
+      onDragOver={onDragOver}
+      onDragCancel={onDragCancel}
+      onDragEnd={onDragEnd}
+    >
+      <div className={cn("space-y-6", compact && "space-y-4 text-sm")}>
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-[11px] text-muted-foreground">
+            {isMatrix
+              ? `Matriz: ${environments.join(" • ")}. `
+              : "Preencha os campos para testar exibições condicionais. "}
+            Clique numa seção ou num campo para localizá-lo no editor.
+          </p>
+          <button
+            type="button"
+            onClick={resetValues}
+            className="shrink-0 text-[11px] text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+          >
+            Limpar
+          </button>
+        </div>
 
-      {previewSections.map(({ section, fields: sf }) => (
-        <div key={section.local_id} className="space-y-3">
-          <div
-            className="cursor-pointer border-b pb-1"
-            title="Mostrar seção no editor"
-            onClick={() => onFocusSection(section.local_id)}
-          >
-            <div className="inline-block bg-foreground px-2 py-0.5 text-xs font-semibold uppercase tracking-wide text-background">
-              {section.title || "(sem título)"}
-            </div>
-            {section.subtitle ? (
-              <p className="mt-1 text-xs italic text-muted-foreground">
-                {section.subtitle}
-              </p>
-            ) : null}
-          </div>
-          <div
-            className="grid gap-4"
-            style={{
-              gridTemplateColumns: `repeat(${section.columns}, minmax(0, 1fr))`,
-            }}
-          >
-            {sf.map((f) => {
-              const key = makeFieldKey(f.localId);
-              const visible = evaluateVisible(f.visible_when, values);
-              if (!visible) return null;
-              const previewField = buildPreviewField(f, templateId);
+        <SortableContext
+          items={previewSections.map(({ section }) => section.local_id)}
+          strategy={verticalListSortingStrategy}
+        >
+          <div className="space-y-4">
+            {previewSections.map(({ section, fields: sf }) => {
+              const visibleFields = sf.filter((field) =>
+                evaluateVisible(field.visible_when, values),
+              );
               return (
-                <div
-                  key={f.localId}
-                  title="Mostrar campo no editor"
-                  className="cursor-pointer rounded-sm transition-shadow hover:ring-2 hover:ring-primary/30"
-                  style={{
-                    gridColumn: `span ${Math.min(f.column_span, section.columns)}`,
-                  }}
-                  onClick={(event) => {
-                    if (!previewClickFocusesEditor(event.target)) return;
-                    onFocusField(f.localId);
-                  }}
-                >
-                  <FieldInputControl
-                    field={previewField}
-                    value={values[key]}
-                    onChange={(patch) => setFieldValue(key, patch)}
-                  />
-                </div>
+                <PreviewSortableSection key={section.local_id} id={section.local_id}>
+                  {(dragHandle) => (
+                    <>
+                      <div className="group/section border-b pb-1">
+                        <div className="relative transition-[padding] group-focus-within/section:pl-6 group-hover/section:pl-6">
+                          {dragHandle}
+                          <div
+                            className="min-w-0 flex-1 cursor-pointer"
+                            title="Mostrar seção no editor"
+                            onClick={() => onFocusSection(section.local_id)}
+                          >
+                            <div className="inline-block bg-foreground px-2 py-0.5 text-xs font-semibold uppercase tracking-wide text-background">
+                              {section.title || "(sem título)"}
+                            </div>
+                            {section.subtitle ? (
+                              <p className="mt-1 text-xs italic text-muted-foreground">
+                                {section.subtitle}
+                              </p>
+                            ) : null}
+                          </div>
+                        </div>
+                      </div>
+                      <SectionDropZone id={section.local_id}>
+                        <SortableContext
+                          items={visibleFields.map((field) => field.localId)}
+                          strategy={rectSortingStrategy}
+                        >
+                          <div
+                            className={cn(
+                              "grid gap-4",
+                              visibleFields.length === 0 && "min-h-10",
+                            )}
+                            style={{
+                              gridTemplateColumns: `repeat(${section.columns}, minmax(0, 1fr))`,
+                            }}
+                          >
+                            {visibleFields.map((field) => {
+                              const key = makeFieldKey(field.localId);
+                              const previewField = buildPreviewField(field, templateId);
+                              return (
+                                <PreviewSortableField
+                                  key={field.localId}
+                                  id={field.localId}
+                                  span={Math.min(field.column_span, section.columns)}
+                                  onClick={(event) => {
+                                    if (!previewClickFocusesEditor(event.target)) return;
+                                    onFocusField(field.localId);
+                                  }}
+                                >
+                                  <FieldInputControl
+                                    field={previewField}
+                                    value={values[key]}
+                                    onChange={(patch) => setFieldValue(key, patch)}
+                                  />
+                                </PreviewSortableField>
+                              );
+                            })}
+                          </div>
+                        </SortableContext>
+                      </SectionDropZone>
+                    </>
+                  )}
+                </PreviewSortableSection>
               );
             })}
           </div>
-        </div>
-      ))}
-    </div>
+        </SortableContext>
+      </div>
+    </DndContext>
   );
 }
 

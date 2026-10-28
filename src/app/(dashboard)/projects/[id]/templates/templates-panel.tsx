@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef, useState, useTransition } from "react";
+import { Fragment, useEffect, useRef, useState, useTransition } from "react";
 import {
   DndContext,
   DragOverlay,
@@ -28,7 +28,7 @@ import {
   type AnimateLayoutChanges,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { ChevronDown, ChevronRight, GripVertical, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronRight, GripVertical, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { deleteTemplate } from "@/app/(dashboard)/templates/[id]/actions";
@@ -44,6 +44,7 @@ import type { ClDiscipline, ClFormTemplate } from "@/lib/supabase/types";
 import { cn } from "@/lib/utils";
 
 import { reorderDisciplines, syncProjectTemplateGroups } from "../actions";
+import { NewTemplateDialog } from "./new-template-dialog";
 
 interface TemplateWithDiscipline extends ClFormTemplate {
   cl_disciplines?: { name: string; color: string } | null;
@@ -71,6 +72,12 @@ function groupKey(group: Group) {
 
 function disciplineIdFromKey(key: string): string | null {
   return key === NO_DISCIPLINE ? null : key;
+}
+
+function sameTemplateIds(current: { id: string }[], next: { id: string }[]) {
+  if (current.length !== next.length) return false;
+  const ids = new Set(current.map((template) => template.id));
+  return next.every((template) => ids.has(template.id));
 }
 
 function buildGroups(
@@ -176,6 +183,10 @@ export function TemplatesPanel({
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
   const [pinnedKeys, setPinnedKeys] = useState<string[] | null>(null);
   const [activeTemplateId, setActiveTemplateId] = useState<string | null>(null);
+  const [insertBefore, setInsertBefore] = useState<{
+    id: string;
+    disciplineId: string | null;
+  } | null>(null);
   const [isPending, startTransition] = useTransition();
 
   const templatesRef = useRef(templates);
@@ -188,6 +199,13 @@ export function TemplatesPanel({
   const recentlyMoved = useRef(false);
   templatesRef.current = templates;
   disciplinesRef.current = disciplines;
+
+  useEffect(() => {
+    setTemplates((current) => {
+      if (sameTemplateIds(current, initialTemplates)) return current;
+      return initialTemplates;
+    });
+  }, [initialTemplates]);
 
   useEffect(() => {
     requestAnimationFrame(() => {
@@ -525,6 +543,12 @@ export function TemplatesPanel({
               disabled={isPending}
               onToggle={() => toggleGroup(groupKey(group))}
               onDelete={handleDelete}
+              onInsertBefore={(templateId) =>
+                setInsertBefore({
+                  id: templateId,
+                  disciplineId: group.discipline?.id ?? null,
+                })
+              }
             />
           ))}
         </div>
@@ -532,6 +556,18 @@ export function TemplatesPanel({
       <DragOverlay>
         {activeTemplate ? <TemplatePreview template={activeTemplate} /> : null}
       </DragOverlay>
+      <NewTemplateDialog
+        key={insertBefore?.id ?? "insert"}
+        projectId={projectId}
+        disciplines={disciplines}
+        insertBeforeId={insertBefore?.id}
+        defaultDisciplineId={insertBefore?.disciplineId ?? null}
+        lockDiscipline
+        open={insertBefore !== null}
+        onOpenChange={(next) => {
+          if (!next) setInsertBefore(null);
+        }}
+      />
     </DndContext>
   );
 }
@@ -542,12 +578,14 @@ function DisciplineGroup({
   disabled,
   onToggle,
   onDelete,
+  onInsertBefore,
 }: {
   group: Group;
   collapsed: boolean;
   disabled: boolean;
   onToggle: () => void;
   onDelete: (template: TemplateWithDiscipline) => void;
+  onInsertBefore: (templateId: string) => void;
 }) {
   const key = groupKey(group);
   const discipline = group.discipline;
@@ -631,13 +669,27 @@ function DisciplineGroup({
               items={group.templates.map((template) => `tpl:${template.id}`)}
               strategy={verticalListSortingStrategy}
             >
-              {group.templates.map((template) => (
-                <TemplateRow
-                  key={template.id}
-                  template={template}
-                  disabled={disabled}
-                  onDelete={() => onDelete(template)}
-                />
+              {group.templates.map((template, index) => (
+                <Fragment key={template.id}>
+                  {index > 0 ? (
+                    <div className="flex justify-center">
+                      <button
+                        type="button"
+                        disabled={disabled}
+                        onClick={() => onInsertBefore(template.id)}
+                        className="flex h-6 items-center gap-1 rounded-full border border-dashed bg-background px-2.5 text-[11px] text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
+                      >
+                        <Plus className="h-3 w-3" />
+                        Inserir
+                      </button>
+                    </div>
+                  ) : null}
+                  <TemplateRow
+                    template={template}
+                    disabled={disabled}
+                    onDelete={() => onDelete(template)}
+                  />
+                </Fragment>
               ))}
             </SortableContext>
             {group.templates.length === 0 ? (

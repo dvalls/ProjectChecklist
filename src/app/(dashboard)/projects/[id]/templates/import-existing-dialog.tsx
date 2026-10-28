@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Copy, Search } from "lucide-react";
 
@@ -17,6 +18,11 @@ import {
 import { Input } from "@/components/ui/input";
 
 import { importExistingTemplate } from "./actions";
+
+function releaseDialogLock() {
+  document.body.style.pointerEvents = "";
+  document.body.removeAttribute("data-scroll-locked");
+}
 
 export interface ImportableTemplate {
   id: string;
@@ -35,10 +41,41 @@ export function ImportExistingTemplateDialog({
   templates: ImportableTemplate[];
   trigger: React.ReactNode;
 }) {
+  const router = useRouter();
+  const refreshAfterClose = useRef(false);
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [, startTransition] = useTransition();
+
+  useEffect(() => {
+    if (open || !refreshAfterClose.current) return;
+    let cancelled = false;
+    const started = performance.now();
+
+    function finish() {
+      if (cancelled || !refreshAfterClose.current) return;
+      refreshAfterClose.current = false;
+      releaseDialogLock();
+      router.refresh();
+    }
+
+    function waitForDialogExit() {
+      if (cancelled) return;
+      const dialog = document.querySelector('[role="dialog"]');
+      if (!dialog || performance.now() - started > 800) {
+        finish();
+        return;
+      }
+      window.setTimeout(waitForDialogExit, 50);
+    }
+
+    const timeout = window.setTimeout(waitForDialogExit, 200);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeout);
+    };
+  }, [open, router]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -57,6 +94,7 @@ export function ImportExistingTemplateDialog({
         toast.error(result.error);
       } else {
         toast.success(`Formulário "${templateName}" adicionado ao projeto.`);
+        refreshAfterClose.current = true;
         setOpen(false);
       }
     });

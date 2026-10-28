@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useId, useState, useTransition } from "react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -32,19 +32,41 @@ export function NewTemplateDialog({
   projectId,
   disciplines,
   trigger,
+  insertBeforeId,
+  defaultDisciplineId = null,
+  lockDiscipline = false,
+  open: controlledOpen,
+  onOpenChange,
 }: {
   projectId: string;
   disciplines: ClDiscipline[];
-  trigger: React.ReactNode;
+  trigger?: React.ReactNode;
+  insertBeforeId?: string;
+  defaultDisciplineId?: string | null;
+  lockDiscipline?: boolean;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }) {
-  const [open, setOpen] = useState(false);
-  const [discipline, setDiscipline] = useState<string>("none");
+  const formId = useId();
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
+  const open = controlledOpen ?? uncontrolledOpen;
+  const [discipline, setDiscipline] = useState<string>(defaultDisciplineId ?? "none");
   const [isPending, startTransition] = useTransition();
+
+  useEffect(() => {
+    if (open) setDiscipline(defaultDisciplineId ?? "none");
+  }, [open, defaultDisciplineId]);
+
+  function setOpen(next: boolean) {
+    if (controlledOpen === undefined) setUncontrolledOpen(next);
+    onOpenChange?.(next);
+  }
 
   function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const formData = new FormData(e.currentTarget);
     formData.set("discipline_id", discipline);
+    if (insertBeforeId) formData.set("insert_before_id", insertBeforeId);
 
     startTransition(async () => {
       const result = await createTemplate(projectId, formData);
@@ -58,28 +80,30 @@ export function NewTemplateDialog({
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>{trigger}</DialogTrigger>
+      {trigger ? <DialogTrigger asChild>{trigger}</DialogTrigger> : null}
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Novo formulário</DialogTitle>
           <DialogDescription>
-            Após criar, você poderá adicionar campos e layout personalizado.
+            {insertBeforeId
+              ? "O formulário entra nesta posição da lista. Depois você adiciona os campos."
+              : "Após criar, você poderá adicionar campos e layout personalizado."}
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="name">Nome</Label>
+            <Label htmlFor={`${formId}-name`}>Nome</Label>
             <Input
-              id="name"
+              id={`${formId}-name`}
               name="name"
               required
               placeholder="Ex: Premissas de estrutura"
             />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="description">Descrição</Label>
+            <Label htmlFor={`${formId}-description`}>Descrição</Label>
             <Textarea
-              id="description"
+              id={`${formId}-description`}
               name="description"
               rows={3}
               placeholder="Descrição opcional"
@@ -87,7 +111,11 @@ export function NewTemplateDialog({
           </div>
           <div className="space-y-2">
             <Label>Disciplina</Label>
-            <Select value={discipline} onValueChange={setDiscipline}>
+            <Select
+              value={discipline}
+              onValueChange={setDiscipline}
+              disabled={lockDiscipline}
+            >
               <SelectTrigger>
                 <SelectValue placeholder="Selecione..." />
               </SelectTrigger>

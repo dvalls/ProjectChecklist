@@ -124,16 +124,18 @@ export function FieldTypeIcon({
 export function TypePicker({
   value,
   onChange,
+  triggerClassName,
 }: {
   value: FieldType;
   onChange: (v: FieldType) => void;
+  triggerClassName?: string;
 }) {
   const current = TYPE_META[value];
   const CurrentIcon = current.icon;
 
   return (
     <Select value={value} onValueChange={(v) => onChange(v as FieldType)}>
-      <SelectTrigger className="h-9">
+      <SelectTrigger className={cn("h-9", triggerClassName)}>
         <span className="!flex min-w-0 items-center gap-2">
           <CurrentIcon className="h-4 w-4 shrink-0 text-muted-foreground" />
           <span className="truncate">{current.label}</span>

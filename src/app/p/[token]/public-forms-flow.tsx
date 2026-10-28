@@ -844,7 +844,7 @@ function FilterBar({
   ];
 
   return (
-    <div className="sticky top-0 z-20 -mx-4 border-b bg-background/95 px-4 py-2 backdrop-blur supports-[backdrop-filter]:bg-background/80 sm:mx-0 sm:rounded-md sm:border sm:px-3">
+    <div className="sticky top-[var(--public-fill-header-h,0px)] z-20 -mx-4 border-b bg-background/95 px-4 py-2 backdrop-blur supports-[backdrop-filter]:bg-background/80 sm:mx-0 sm:rounded-md sm:border sm:px-3">
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-xs font-medium text-muted-foreground">Filtrar:</span>
         <div className="flex flex-wrap gap-1.5">

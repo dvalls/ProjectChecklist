@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ArrowLeft } from "lucide-react";
 
 import { ThemeToggle } from "@/components/layout/theme-toggle";
@@ -50,6 +50,7 @@ export function PublicFillWrapper({
   preview = false,
 }: Props) {
   const router = useRouter();
+  const headerRef = useRef<HTMLDivElement>(null);
   const [identity, setIdentity] = useState<PublicIdentity | null>(null);
   const [hydrated, setHydrated] = useState(false);
 
@@ -68,6 +69,19 @@ export function PublicFillWrapper({
     setIdentity(saved);
   }, [preview, token, router]);
 
+  useEffect(() => {
+    const header = headerRef.current;
+    const root = header?.parentElement;
+    if (!header || !root) return;
+    const apply = () => {
+      root.style.setProperty("--public-fill-header-h", `${header.offsetHeight}px`);
+    };
+    apply();
+    const observer = new ResizeObserver(apply);
+    observer.observe(header);
+    return () => observer.disconnect();
+  }, [hydrated, identity, preview]);
+
   if (!hydrated || !identity) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-secondary dark:bg-background">
@@ -80,7 +94,7 @@ export function PublicFillWrapper({
 
   return (
     <div className="flex min-h-screen flex-col bg-secondary dark:bg-background">
-      <div className="border-b bg-background">
+      <div ref={headerRef} className="sticky top-0 z-30 border-b bg-background">
         <div className="mx-auto flex w-full max-w-6xl flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
           <Link
             href={backHref}

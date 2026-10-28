@@ -19,16 +19,20 @@ export function InlineHtmlEditor({
   placeholder,
   autoFocus,
   tall = false,
+  onBlur,
 }: {
   value: string;
   onChange: (html: string) => void;
   placeholder?: string;
   autoFocus?: boolean;
   tall?: boolean;
+  onBlur?: () => void;
 }) {
   const emitted = useRef(sanitizeFieldHtml(value));
   const onChangeRef = useRef(onChange);
+  const onBlurRef = useRef(onBlur);
   onChangeRef.current = onChange;
+  onBlurRef.current = onBlur;
   const [linkOpen, setLinkOpen] = useState(false);
   const [linkUrl, setLinkUrl] = useState("");
   const [linkError, setLinkError] = useState<string | null>(null);
@@ -72,6 +76,7 @@ export function InlineHtmlEditor({
       emitted.current = clean;
       onChangeRef.current(clean);
     },
+    onBlur: () => onBlurRef.current?.(),
   });
 
   useEffect(() => {

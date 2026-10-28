@@ -258,8 +258,11 @@ A prop é `description`; `projectName` foi removida.
 
 ## Drag-and-drop no builder (`template-builder.tsx`)
 
-Há um único `DndContext` para seções e campos. `collisionDetection` separa os
-alvos:
+Editor e preview têm cada um o seu `DndContext`, irmãos, nunca aninhados. Os
+dois usam os mesmos ids (`local_id` / `localId`) e os mesmos handlers. Não
+junte os contextos: ids duplicados no mesmo contexto quebram o alvo.
+
+`collisionDetection` separa os alvos:
 
 - Arrastar **seção**: só considera droppables cujo `id` está em
   `sections.map(s => s.local_id)` (distância do ponteiro ao centro vertical).
@@ -269,6 +272,28 @@ alvos:
   da seção atual. Seção recolhida abre ao receber o campo.
 
 Não volte a aninhar um `DndContext` por seção — isso quebrava o drag de seções.
+
+No preview a alça é só o grip. A grade da seção usa `rectSortingStrategy`.
+Clique no bloco continua levando o foco ao editor; controles do formulário
+não iniciam o arraste.
+
+Tipos do documento em edição (`EditorSection` / `EditorField`) ficam em
+`src/components/form-builder/editor-model.ts`.
+
+## Histórico do builder (undo/redo)
+
+`src/lib/forms/editor-history.ts` guarda até 50 snapshots do documento
+(`EditorSnapshot`: nome, descrição, layout, ambientes, seções, campos).
+
+- `pushDiscrete` — ações pontuais (criar/apagar/mover).
+- `pushCoalesced(key)` — digitação contínua no mesmo campo; muda a `key`
+  quando o alvo muda.
+- `undo` / `redo` — Cmd/Ctrl+Z e Cmd/Ctrl+Shift+Z (ou Y). Ignora se o
+  alvo for input/textarea/contenteditable (`isTextEditingTarget`).
+
+Toda mutação do documento deve passar por `patchDoc` no
+`template-builder.tsx`. Não chame `setSections`/`setFields` direto se a
+ação precisar de histórico.
 
 ## Ordem dos formulários do projeto (`templates-panel.tsx`)
 
@@ -285,6 +310,15 @@ Helpers genéricos em `src/lib/forms/reorder-groups.ts`:
 vez de reordenar arrays no componente. `syncProjectTemplateGroups` exige
 a lista completa dos templates do projeto. `reorderDisciplines` exige a
 lista completa de disciplinas (mesmo as sem formulário).
+
+`createTemplate` aceita `insert_before_id`: abre um índice na disciplina
+e coloca o novo formulário nessa `position` (`positionForInsert`). O
+dialog de novo formulário pode ser controlado (`open` / `onOpenChange`)
+e travar a disciplina (`lockDiscipline`) quando o insert vem do painel.
+
+Após importar um template, o dialog só chama `router.refresh()` quando
+o overlay some (`releaseDialogLock`) — senão o body fica com
+`pointer-events: none`.
 
 ## Texto rico em `label` e `help_text`
 
@@ -323,6 +357,13 @@ Nesse modo o fluxo público:
 
 Ao adicionar rotas ou writes no fluxo `/p/[token]`, preserve o query
 `preview=1` com `withPreview` e pule persistência quando `preview` for true.
+
+O header do preenchimento é `sticky`. Ele publica a altura em
+`--public-fill-header-h` no container. A `FilterBar` usa
+`top: var(--public-fill-header-h, 0px)` para não ficar por baixo do
+header. Na lista pública, a barra de progresso some quando
+`totalAll === 0`; o rodapé "Envio geral" conta só itens novos do
+usuário (`doneAll - respostas já no servidor`).
 
 ## Igualar ambientes na matriz (`EnvLinks`)
 
